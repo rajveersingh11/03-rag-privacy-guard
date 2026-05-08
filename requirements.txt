@@ -1,0 +1,43 @@
+# ==========================================
+# AegisVault: 2026 Enterprise RAG Security
+# ==========================================
+
+# ─── Core API & Server ────────────────────
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+pyyaml
+
+scikit-learn
+
+# ─── Layer 1: Privacy Math & PII Scrubbing ─
+numpy                # Crucial for Differential Privacy (Laplacian Noise)
+presidio-analyzer     # Microsoft's Enterprise PII detection
+presidio-anonymizer   # Replaces PII with safe pseudonyms
+
+# ─── Layer 2: Agentic Intent Routing ──────
+transformers          # For running Llama Guard / Security LLMs
+torch                  # PyTorch backend for Transformers
+
+# ─── LLM Orchestration & Chunking ─────────
+langchain
+langchain-openai
+langchain-community
+tiktoken               # Tokenizer for OpenAI models
+
+# ─── Layer 3 & 4: Retrieval & GraphRAG ────
+chromadb              # Vector Database for semantic search
+neo4j                 # Graph Database for Multi-tenant isolation
+
+# ─── Layer 6: Audit Logging ───────────────
+sqlalchemy            # ORM for interacting with PostgreSQL
+psycopg2-binary         # PostgreSQL adapter for Python
+
+# ─── Asynchronous MLOps (Decoupled Worker) ─
+celery                 # Background task orchestrator for Layer 1
+redis                 # Message broker for Celery
+
+# ─── Testing & Formatting (Optional) ──────
+pytest
+black
