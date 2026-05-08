@@ -1,7 +1,7 @@
 """
 AegisVault Pipelines
 ---------------------
-Two pipelines coordinate all security components end-to-end.
+Two pipelines coordinate all security guards end-to-end.
 
 IngestionPipeline  — offline/async, called by Celery worker
                      Layer 1 (scrub) → Layer 1 (DP embed) → ChromaDB + Neo4j

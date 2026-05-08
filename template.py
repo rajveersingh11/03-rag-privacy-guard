@@ -11,13 +11,13 @@ list_of_files = [
     ".github/workflows/.gitkeep",
     f"src/{project_name}/__init__.py",
     
-    # ── COMPONENTS: The "Guts" of the security logic ──────────
-    f"src/{project_name}/components/__init__.py",
-    f"src/{project_name}/components/ingestion_scrubber.py", # Layer 1: PII/Secret removal
-    f"src/{project_name}/components/privacy_math.py",       # Layer 1: Differential Privacy (DP)
-    f"src/{project_name}/components/semantic_router.py",    # Layer 2: Agentic Intent classification
-    f"src/{project_name}/components/graph_boundary.py",     # Layer 3: Multi-tenant Graph isolation
-    f"src/{project_name}/components/output_sanitizer.py",   # Layer 5: Canary tokens & Redaction
+    # ── GUARDS: The "Guts" of the security logic ──────────
+    f"src/{project_name}/guards/__init__.py",
+    f"src/{project_name}/guards/ingestion_scrubber.py", # Layer 1: PII/Secret removal
+    f"src/{project_name}/guards/privacy_math.py",       # Layer 1: Differential Privacy (DP)
+    f"src/{project_name}/guards/semantic_router.py",    # Layer 2: Agentic Intent classification
+    f"src/{project_name}/guards/graph_boundary.py",     # Layer 3: Multi-tenant Graph isolation
+    f"src/{project_name}/guards/output_sanitizer.py",   # Layer 5: Canary tokens & Redaction
 
     # ── ENTITY: Data Classes for strict type-safety ───────────
     f"src/{project_name}/entity/__init__.py",
