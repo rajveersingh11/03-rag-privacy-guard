@@ -41,3 +41,6 @@ redis                 # Message broker for Celery
 # ─── Testing & Formatting (Optional) ──────
 pytest
 black
+
+#____ plot_______
+matplotlib

@@ -12,6 +12,7 @@ dependencies = [
     "langchain>=1.2.18",
     "langchain-community>=0.4.1",
     "langchain-openai>=1.2.1",
+    "matplotlib>=3.10.9",
     "neo4j>=6.2.0",
     "numpy>=2.4.4",
     "presidio-analyzer>=2.2.362",
