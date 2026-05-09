@@ -27,7 +27,7 @@ def _get_engine():
     if _engine is None:
         db_url = os.environ.get(
             "DATABASE_URL",
-            "postgresql://aegis:aegis@localhost:5432/aegisdb"
+            "mysql+pymysql://aegis:aegis@localhost:3306/aegisdb"
         )
         _engine = create_engine(
             db_url,

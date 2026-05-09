@@ -49,7 +49,7 @@ retrieval:
   top_k: 5
   chroma_collection: "aegis_documents"
   chroma_persist_dir: "./data/chroma_db"
-  embedding_model: "text-embedding-3-small"
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
   similarity_threshold: 0.4
 
 # ─────────────── GraphRAG Boundaries (Layer 3) ────────────
@@ -62,7 +62,7 @@ graph:
 
 # ─────────────── LLM (Layer 4 & 5) ───────────────────────
 llm:
-  model_id: "gpt-4o"
+  model_id: "gemini-1.5-flash"
   temperature: 0.0
   max_tokens: 1024
   system_prompt: >

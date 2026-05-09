@@ -97,14 +97,15 @@ class IngestionPipeline:
             )
 
         # ── Layer 1c: Build chunk metadata ────────────────────────────
+        import json
         chunk_metas = [
             {
                 **metadata,
                 "chunk_id":          f"{doc_id}_chunk_{i}",
                 "doc_id":            doc_id,
                 "sensitivity_class": scan.sensitivity_class,
-                "pii_found":         [e.get("entity_type","") for e in scan.entities_found],
-                "acl_roles":         acl_roles,
+                "pii_found":         json.dumps([e.get("entity_type","") for e in scan.entities_found]),
+                "acl_roles":         json.dumps(acl_roles),
                 "tenant_id":         tenant_id,
                 "pii_redacted":      scan.was_modified,
             }

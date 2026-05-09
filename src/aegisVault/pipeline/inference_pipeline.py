@@ -36,7 +36,7 @@ class InferencePipeline:
         self,
         config:       AegisVaultConfig,
         vectorstore,                       # Chroma vectorstore
-        llm_client,                        # OpenAI client
+        llm_client,                        # OpenAI or Gemini client
         db_session    = None,              # SQLAlchemy session
     ):
         self.cfg        = config
@@ -45,6 +45,7 @@ class InferencePipeline:
         self.db         = db_session
         self.router     = SemanticRouter(config.semantic_router)
         self.sanitizer  = OutputSanitizer(config.output_sanitizer, config.pii)
+        self.history    = {}               # {session_id: [messages]}
         logger.info("InferencePipeline ready")
 
     # ── Main entry point ───────────────────────────────────────────────
@@ -56,25 +57,32 @@ class InferencePipeline:
         user_roles:  List[str] = None,
         tenant_id:   str = "default",
         top_k:       int = None,
+        session_id:  str = None,
     ) -> InferenceArtifact:
         trace_id  = str(uuid.uuid4())
         start_ms  = time.time()
         user_roles = user_roles or ["employee"]
         top_k     = top_k or self.cfg.retrieval.top_k
+        session_id = session_id or "default"
+
+        # ── Layer 0: Standalone Query (Memory) ─────────────────────────
+        standalone_query = self._get_standalone_query(user_query, session_id)
+        logger.debug(f"[{trace_id}] Standalone Query: {standalone_query}")
 
         # ── Layer 2: Semantic Route ────────────────────────────────────
-        route = self.router.route(user_query)
+        route = self.router.route(standalone_query)
         if route.action == "block":
             logger.warning(f"[{trace_id}] BLOCKED | user={user_id} | reason={route.category}")
             return self._blocked_response(trace_id, user_query, route.category,
                                           int((time.time()-start_ms)*1000))
 
-        safe_query = route.safe_query or user_query
+        safe_query = route.safe_query or standalone_query
 
         # ── Layer 3: RBAC-filtered retrieval ──────────────────────────
         raw_results = self.vectorstore.similarity_search_with_relevance_scores(
             safe_query, k=top_k * 2  # fetch extra, filter down
         )
+# ... (rest of method continues, remember to append to history at the end)
 
         user_clearance = ROLE_CLEARANCE.get(
             max(user_roles, key=lambda r: sensitivity_index(ROLE_CLEARANCE.get(r, "PUBLIC"))),
@@ -123,12 +131,25 @@ class InferencePipeline:
         ]
 
         # ── LLM call ──────────────────────────────────────────────────
-        response = self.llm.chat.completions.create(
-            model=self.cfg.llm.model_id,
-            messages=messages,
-            temperature=self.cfg.llm.temperature,
-            max_tokens=self.cfg.llm.max_tokens,
-        ).choices[0].message.content
+        if hasattr(self.llm, "chat") and hasattr(self.llm.chat, "completions"):
+            # OpenAI SDK style
+            response = self.llm.chat.completions.create(
+                model=self.cfg.llm.model_id,
+                messages=messages,
+                temperature=self.cfg.llm.temperature,
+                max_tokens=self.cfg.llm.max_tokens,
+            ).choices[0].message.content
+        else:
+            # LangChain BaseChatModel style (Gemini)
+            from langchain_core.messages import HumanMessage, SystemMessage
+            lc_messages = []
+            for m in messages:
+                if m["role"] == "system":
+                    lc_messages.append(SystemMessage(content=m["content"]))
+                else:
+                    lc_messages.append(HumanMessage(content=m["content"]))
+            
+            response = self.llm.invoke(lc_messages).content
 
         # ── Layer 5: Output sanitization ──────────────────────────────
         sanitized = self.sanitizer.sanitize(response, trace_id)
@@ -144,6 +165,17 @@ class InferencePipeline:
                     len(authorized_chunks), blocked_count,
                     sanitized.pii_entities_removed, sanitized.violations, latency_ms)
 
+        # ── SINGLE-USE LOGIC: Update Conversation History ─────────────
+        if session_id not in self.history:
+            self.history[session_id] = []
+        
+        self.history[session_id].append({"role": "user", "content": user_query})
+        self.history[session_id].append({"role": "assistant", "content": sanitized.safe_response})
+        
+        # Keep only last 5 turns to stay within context limits
+        if len(self.history[session_id]) > 10:
+            self.history[session_id] = self.history[session_id][-10:]
+
         return InferenceArtifact(
             trace_id=trace_id,
             query=safe_query,
@@ -157,6 +189,45 @@ class InferencePipeline:
         )
 
     # ── Helpers ────────────────────────────────────────────────────────
+
+    def _get_standalone_query(self, query: str, session_id: str) -> str:
+        """
+        Uses the LLM to rewrite a follow-up question into a standalone query
+        based on the conversational history.
+        """
+        history = self.history.get(session_id, [])
+        if not history:
+            return query
+
+        # Build context from history
+        context_str = "\n".join([f"{m['role']}: {m['content']}" for m in history[-6:]])
+        
+        prompt = (
+            "Given the following conversation history and a follow-up question, "
+            "rephrase the follow-up question to be a standalone question that can be "
+            "understood without the history. Do NOT answer the question, just rephrase it.\n\n"
+            f"History:\n{context_str}\n\n"
+            f"Follow-up: {query}\n\n"
+            "Standalone Question:"
+        )
+
+        try:
+            # Reuse LLM logic for rephrasing
+            if hasattr(self.llm, "chat") and hasattr(self.llm.chat, "completions"):
+                resp = self.llm.chat.completions.create(
+                    model=self.cfg.llm.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=256,
+                ).choices[0].message.content
+            else:
+                from langchain_core.messages import HumanMessage
+                resp = self.llm.invoke([HumanMessage(content=prompt)]).content
+            
+            return resp.strip()
+        except Exception as e:
+            logger.warning(f"Standalone query rephrasing failed: {e}")
+            return query
 
     def _blocked_response(self, trace_id, query, reason, latency_ms) -> InferenceArtifact:
         return InferenceArtifact(
@@ -179,18 +250,19 @@ class InferencePipeline:
         if not self.db:
             return
         try:
+            import json
             from datetime import datetime
             from sqlalchemy import text
             self.db.execute(text("""
                 INSERT INTO audit_log
-                  (trace_id, user_id, query, response, chunks_used,
+                  (id, trace_id, user_id, query, response, chunks_used,
                    rbac_blocked, pii_redacted, violations, latency_ms, timestamp)
                 VALUES
-                  (:tid, :uid, :q, :r, :cu, :rb, :pr, :v::jsonb, :lm, :ts)
+                  (:id, :tid, :uid, :q, :r, :cu, :rb, :pr, :v, :lm, :ts)
             """), {
-                "tid": trace_id, "uid": user_id, "q": query, "r": response,
+                "id": trace_id, "tid": trace_id, "uid": user_id, "q": query, "r": response,
                 "cu": chunks_used, "rb": blocked, "pr": pii_redacted,
-                "v": str(violations), "lm": latency_ms, "ts": datetime.utcnow(),
+                "v": json.dumps(violations), "lm": latency_ms, "ts": datetime.utcnow(),
             })
             self.db.commit()
         except Exception as e:

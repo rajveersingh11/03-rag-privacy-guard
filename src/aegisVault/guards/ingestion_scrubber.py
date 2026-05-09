@@ -49,7 +49,14 @@ class IngestionScrubber:
         self.quarantine_dir = ensure_dir(quarantine_dir)
         self.analyzer  = AnalyzerEngine()
         self.anonymizer = AnonymizerEngine()
-        logger.info("IngestionScrubber initialised with Presidio")
+        
+        # Filter for supported entities to avoid "Recognizer not found" warnings
+        supported_entities = self.analyzer.get_supported_entities()
+        self.entities_to_detect = [
+            e for e in cfg.entities_to_detect if e in supported_entities
+        ]
+        
+        logger.info(f"IngestionScrubber initialised with Presidio | Entities supported: {len(self.entities_to_detect)}")
 
     # ── Public entry point ─────────────────────────────────────────────
 

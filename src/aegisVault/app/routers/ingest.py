@@ -12,7 +12,7 @@ Auth: X-API-Key header
 import os
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, Query, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -43,6 +43,7 @@ def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
 
 @router.post("/file", response_model=IngestResponse)
 async def ingest_file(
+    request:    Request,
     file:       UploadFile = File(..., description="Plain text file (.txt, .md, .csv)"),
     tenant_id:  str        = Form(default="default"),
     acl_roles:  str        = Form(default="employee",
@@ -57,8 +58,6 @@ async def ingest_file(
     Async (default): queues a Celery task → returns immediately with task_id.
     Sync (?async=false): runs pipeline inline → returns full result.
     """
-    from aegisVault.app.main import state
-
     content = (await file.read()).decode("utf-8", errors="replace")
     metadata = {
         "source":   file.filename,
@@ -70,7 +69,7 @@ async def ingest_file(
     if run_async:
         # Queue via Celery worker
         try:
-            from aegisVault.worker import ingest_document_task
+            from src.aegisVault.worker import ingest_document_task
             task = ingest_document_task.delay(content, metadata, tenant_id, roles)
             return IngestResponse(
                 doc_id=metadata.get("source", "unknown"),
@@ -86,7 +85,7 @@ async def ingest_file(
             pass
 
     # Synchronous ingestion
-    pipeline = state.get("ingestion_pipeline")
+    pipeline = getattr(request.app.state, "ingestion_pipeline", None)
     if not pipeline:
         raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")
 
@@ -110,6 +109,7 @@ async def ingest_file(
 
 @router.post("/text", response_model=IngestResponse)
 async def ingest_text(
+    request:    Request,
     text:       str   = Form(..., description="Raw document text"),
     source:     str   = Form(default="manual_input"),
     tenant_id:  str   = Form(default="default"),
@@ -117,9 +117,7 @@ async def ingest_text(
     _key:       str   = Depends(verify_api_key),
 ):
     """Ingest raw text directly (no file upload needed)."""
-    from aegisVault.app.main import state
-
-    pipeline = state.get("ingestion_pipeline")
+    pipeline = getattr(request.app.state, "ingestion_pipeline", None)
     if not pipeline:
         raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")
 

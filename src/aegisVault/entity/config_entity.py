@@ -85,8 +85,27 @@ class CeleryConfig:
 
 
 @dataclass
+class AppConfig:
+    name: str
+    version: str
+    host: str
+    port: int
+    debug: bool
+
+
+@dataclass
+class PathsConfig:
+    data_dir: str
+    chroma_dir: str
+    quarantine_dir: str
+    audit_log_dir: str
+
+
+@dataclass
 class AegisVaultConfig:
     """Root config object — holds all section configs."""
+    app:              AppConfig
+    paths:            PathsConfig
     dp:               DifferentialPrivacyConfig
     pii:              PIIConfig
     semantic_router:  SemanticRouterConfig

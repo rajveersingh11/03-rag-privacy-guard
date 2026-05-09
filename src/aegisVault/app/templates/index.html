@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AegisVault | RAG Security Control</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cyan: #06b6d4;
+            --cyan-deep: #0891b2;
+            --cyan-glow: rgba(6, 182, 212, 0.36);
+            --emerald: #10b981;
+            --emerald-glow: rgba(16, 185, 129, 0.3);
+            --violet: #7c3aed;
+            --rose: #f43f5e;
+            --amber: #f59e0b;
+            --navy-950: #020617;
+            --navy-900: #06111f;
+            --navy-850: #0b1528;
+            --navy-800: #0f172a;
+            --slate-500: #64748b;
+            --slate-400: #94a3b8;
+            --white: #f8fafc;
+            --glass: rgba(15, 23, 42, 0.66);
+            --glass-strong: rgba(15, 23, 42, 0.82);
+            --glass-soft: rgba(255, 255, 255, 0.055);
+            --border: rgba(148, 163, 184, 0.18);
+            --border-bright: rgba(6, 182, 212, 0.46);
+            --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+            --sidebar-width: 272px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 12% 18%, rgba(6, 182, 212, 0.22), transparent 28rem),
+                radial-gradient(circle at 82% 8%, rgba(124, 58, 237, 0.18), transparent 28rem),
+                radial-gradient(circle at 72% 82%, rgba(16, 185, 129, 0.14), transparent 26rem),
+                linear-gradient(135deg, var(--navy-950), var(--navy-900) 48%, #030712);
+            color: var(--white);
+            font-family: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+            background-size: 52px 52px;
+            -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 72%);
+            mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 72%);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+        }
+
+        .shell {
+            width: 100%;
+            min-width: 0;
+            display: flex;
+            position: relative;
+            z-index: 1;
+        }
+
+        .sidebar {
+            width: var(--sidebar-width);
+            flex: 0 0 var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            padding: 1.5rem;
+            background: rgba(2, 6, 23, 0.72);
+            border-right: 1px solid var(--border);
+            box-shadow: 14px 0 56px rgba(0, 0, 0, 0.2);
+            -webkit-backdrop-filter: blur(18px);
+            backdrop-filter: blur(18px);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            min-height: 3rem;
+        }
+
+        .brand-mark {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--border-bright);
+            border-radius: 14px;
+            background: linear-gradient(145deg, rgba(6, 182, 212, 0.22), rgba(16, 185, 129, 0.08));
+            color: var(--cyan);
+            box-shadow: 0 0 26px var(--cyan-glow);
+        }
+
+        .brand-text {
+            display: grid;
+            gap: 0.1rem;
+        }
+
+        .brand-text strong {
+            font-size: 1.02rem;
+            letter-spacing: 0.08em;
+        }
+
+        .brand-text span {
+            color: var(--slate-400);
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+
+        .nav-group {
+            display: grid;
+            gap: 0.45rem;
+        }
+
+        .nav-label {
+            padding: 0 0.7rem 0.35rem;
+            color: var(--slate-500);
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .nav-item {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            min-height: 2.8rem;
+            padding: 0 0.85rem;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            background: transparent;
+            color: var(--slate-400);
+            cursor: pointer;
+            text-align: left;
+            transition: color 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .nav-item:hover {
+            background: var(--glass-soft);
+            color: var(--white);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.04));
+            border-color: rgba(6, 182, 212, 0.32);
+            color: var(--cyan);
+            box-shadow: inset 3px 0 0 var(--cyan), 0 0 24px rgba(6, 182, 212, 0.08);
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            display: grid;
+            gap: 0.85rem;
+        }
+
+        .secure-card {
+            padding: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--glass-soft);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            width: fit-content;
+            max-width: 100%;
+            padding: 0.45rem 0.72rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(2, 6, 23, 0.48);
+            color: var(--slate-400);
+            font-size: 0.74rem;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--emerald);
+            box-shadow: 0 0 14px var(--emerald);
+        }
+
+        main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .topbar {
+            min-height: 76px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0 2rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(2, 6, 23, 0.32);
+            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(16px);
+        }
+
+        .title-stack {
+            display: grid;
+            gap: 0.25rem;
+        }
+
+        .eyebrow {
+            color: var(--cyan);
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        #view-title {
+            font-size: clamp(1.1rem, 2vw, 1.55rem);
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .pipeline-panel {
+            padding: 1.25rem 2rem 1.1rem;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(90deg, rgba(2, 6, 23, 0.34), rgba(6, 182, 212, 0.055), rgba(2, 6, 23, 0.16));
+        }
+
+        .pipeline-flow {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(6, minmax(82px, 1fr));
+            gap: 1rem;
+            align-items: start;
+            max-width: 1120px;
+        }
+
+        .pipeline-flow::before,
+        .pipeline-flow::after {
+            content: "";
+            position: absolute;
+            left: 6%;
+            right: 6%;
+            top: 25px;
+            height: 2px;
+            border-radius: 999px;
+        }
+
+        .pipeline-flow::before {
+            background: rgba(148, 163, 184, 0.18);
+        }
+
+        .pipeline-flow::after {
+            background: linear-gradient(90deg, transparent, var(--cyan), var(--emerald), transparent);
+            box-shadow: 0 0 18px var(--cyan-glow);
+            animation: pipeline-scan 2.2s ease-in-out infinite;
+            transform-origin: left;
+        }
+
+        .pipeline-node {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            justify-items: center;
+            gap: 0.65rem;
+            color: var(--slate-400);
+        }
+
+        .node-icon {
+            width: 52px;
+            height: 52px;
+            display: grid;
+            place-items: center;
+            border: 1px solid rgba(6, 182, 212, 0.32);
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.9);
+            color: var(--cyan);
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 0 24px rgba(6, 182, 212, 0.12);
+            transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+        }
+
+        .pipeline-node.processing .node-icon {
+            transform: translateY(-3px) scale(1.04);
+            border-color: var(--emerald);
+            color: var(--emerald);
+            box-shadow: 0 0 28px var(--emerald-glow);
+        }
+
+        .pipeline-node.processing .node-icon::after {
+            content: "";
+            position: absolute;
+            width: 52px;
+            height: 52px;
+            border: 1px solid var(--emerald);
+            border-radius: 16px;
+            animation: node-pulse 1.2s ease-out infinite;
+        }
+
+        .node-label {
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .control-grid {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+            gap: 1.35rem;
+            padding: 1.35rem 2rem 2rem;
+            overflow: hidden;
+        }
+
+        .glass-panel {
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: linear-gradient(145deg, rgba(15, 23, 42, 0.76), rgba(15, 23, 42, 0.56));
+            box-shadow: var(--shadow);
+            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px);
+        }
+
+        .view-panel {
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            min-height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-heading {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            font-weight: 800;
+        }
+
+        .panel-heading i {
+            color: var(--cyan);
+        }
+
+        .chat-messages {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            padding: 1.25rem;
+            overflow-y: auto;
+        }
+
+        .bubble {
+            max-width: min(82%, 58rem);
+            padding: 0.95rem 1.05rem;
+            border-radius: 18px;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            animation: bubble-in 0.22s ease-out both;
+        }
+
+        .bubble.bot {
+            align-self: flex-start;
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 5px;
+            background: rgba(255, 255, 255, 0.055);
+            color: #dbeafe;
+        }
+
+        .bubble.user {
+            align-self: flex-end;
+            border: 1px solid rgba(6, 182, 212, 0.42);
+            border-bottom-right-radius: 5px;
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.95), rgba(8, 145, 178, 0.86));
+            color: white;
+            box-shadow: 0 10px 34px rgba(6, 182, 212, 0.18);
+        }
+
+        .chat-form {
+            display: flex;
+            gap: 0.85rem;
+            padding: 1.15rem;
+            border-top: 1px solid var(--border);
+            background: rgba(2, 6, 23, 0.35);
+        }
+
+        .input-shell {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-height: 48px;
+            padding: 0 1rem;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: rgba(2, 6, 23, 0.5);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .input-shell:focus-within {
+            border-color: var(--border-bright);
+            box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.08);
+        }
+
+        .input-shell i {
+            color: var(--slate-400);
+        }
+
+        #user-input {
+            width: 100%;
+            min-width: 0;
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: var(--white);
+        }
+
+        #user-input::placeholder {
+            color: var(--slate-500);
+        }
+
+        .icon-button {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            background: linear-gradient(135deg, var(--cyan), var(--cyan-deep));
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 0 26px var(--cyan-glow);
+            transition: transform 0.2s, opacity 0.2s;
+        }
+
+        .icon-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .icon-button:disabled {
+            cursor: wait;
+            opacity: 0.65;
+            transform: none;
+        }
+
+        .inspector {
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            overflow-y: auto;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .metric {
+            padding: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: rgba(15, 23, 42, 0.62);
+            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(16px);
+        }
+
+        @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+            .sidebar,
+            .topbar,
+            .glass-panel,
+            .metric {
+                background-color: rgba(15, 23, 42, 0.94);
+            }
+        }
+
+        .metric label {
+            display: block;
+            margin-bottom: 0.45rem;
+            color: var(--slate-400);
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            color: var(--cyan);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 1.05rem;
+        }
+
+        .trace-card {
+            padding: 1.15rem;
+        }
+
+        .trace-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-bottom: 0.95rem;
+            color: var(--slate-400);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .trace-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.72rem 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--slate-400);
+            font-size: 0.86rem;
+        }
+
+        .trace-row:last-child {
+            border-bottom: 0;
+        }
+
+        .trace-val {
+            color: var(--white);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.82rem;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+
+        .ok {
+            color: var(--emerald) !important;
+        }
+
+        .danger {
+            color: var(--rose) !important;
+        }
+
+        .warning-box {
+            display: none;
+            margin-top: 1rem;
+            padding: 0.9rem;
+            border: 1px solid rgba(244, 63, 94, 0.45);
+            border-radius: 14px;
+            background: rgba(244, 63, 94, 0.12);
+            color: #fecdd3;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .warning-box.visible {
+            display: block;
+        }
+
+        .audit-stream {
+            display: grid;
+            gap: 0.75rem;
+            max-height: 13rem;
+            overflow-y: auto;
+        }
+
+        .audit-event {
+            padding: 0.82rem;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .audit-event strong {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-size: 0.82rem;
+        }
+
+        .audit-event span {
+            color: var(--slate-400);
+            font-size: 0.74rem;
+        }
+
+        .ingest-body {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            place-items: center;
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .drop-zone {
+            width: min(100%, 560px);
+            display: grid;
+            justify-items: center;
+            gap: 1rem;
+            padding: 3.2rem 2rem;
+            border: 1px dashed rgba(6, 182, 212, 0.42);
+            border-radius: 24px;
+            background:
+                radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.16), transparent 18rem),
+                rgba(255, 255, 255, 0.04);
+            cursor: pointer;
+            text-align: center;
+            transition: transform 0.2s, border-color 0.2s, background 0.2s;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            transform: translateY(-2px);
+            border-color: var(--emerald);
+            background:
+                radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.18), transparent 18rem),
+                rgba(255, 255, 255, 0.055);
+        }
+
+        .drop-icon {
+            width: 72px;
+            height: 72px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--border-bright);
+            border-radius: 22px;
+            color: var(--cyan);
+            background: rgba(6, 182, 212, 0.09);
+            box-shadow: 0 0 34px rgba(6, 182, 212, 0.18);
+            font-size: 1.9rem;
+        }
+
+        .drop-zone h2 {
+            font-size: 1.25rem;
+        }
+
+        .drop-zone p {
+            max-width: 28rem;
+            color: var(--slate-400);
+            line-height: 1.5;
+        }
+
+        #ingest-results {
+            width: min(100%, 560px);
+            margin-top: 1rem;
+        }
+
+        .result-card {
+            padding: 1rem;
+            border-radius: 18px;
+            border: 1px solid rgba(16, 185, 129, 0.38);
+            background: rgba(16, 185, 129, 0.08);
+            animation: bubble-in 0.2s ease-out both;
+        }
+
+        .result-card.failed {
+            border-color: rgba(244, 63, 94, 0.42);
+            background: rgba(244, 63, 94, 0.1);
+        }
+
+        .result-title {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-bottom: 0.6rem;
+            font-weight: 800;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .pulse-danger {
+            border-color: rgba(244, 63, 94, 0.48);
+            animation: danger-pulse 1.8s infinite;
+        }
+
+        @keyframes pipeline-scan {
+            0% { clip-path: inset(0 100% 0 0); opacity: 0.35; }
+            20% { opacity: 1; }
+            75% { clip-path: inset(0 0 0 0); opacity: 1; }
+            100% { clip-path: inset(0 0 0 100%); opacity: 0.35; }
+        }
+
+        @keyframes node-pulse {
+            0% { transform: scale(0.92); opacity: 0.8; }
+            100% { transform: scale(1.45); opacity: 0; }
+        }
+
+        @keyframes bubble-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes danger-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.3), var(--shadow); }
+            70% { box-shadow: 0 0 0 12px rgba(244, 63, 94, 0), var(--shadow); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0), var(--shadow); }
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.24);
+            border-radius: 999px;
+        }
+
+        @media (max-width: 1100px) {
+            body {
+                overflow: auto;
+            }
+
+            .shell {
+                min-height: 100vh;
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                flex-basis: auto;
+                gap: 1rem;
+                padding: 1rem;
+            }
+
+            .nav-group {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .nav-label {
+                grid-column: 1 / -1;
+            }
+
+            .sidebar-footer {
+                margin-top: 0;
+            }
+
+            main {
+                overflow: visible;
+            }
+
+            .control-grid {
+                grid-template-columns: 1fr;
+                overflow: visible;
+            }
+
+            .view-panel {
+                min-height: 34rem;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .topbar {
+                align-items: flex-start;
+                flex-direction: column;
+                padding: 1rem;
+            }
+
+            .system-status {
+                justify-content: flex-start;
+            }
+
+            .pipeline-panel {
+                padding: 1rem;
+                overflow-x: auto;
+            }
+
+            .pipeline-flow {
+                min-width: 640px;
+            }
+
+            .control-grid {
+                padding: 1rem;
+            }
+
+            .chat-form {
+                align-items: stretch;
+            }
+
+            .metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
+                <div class="brand-text">
+                    <strong>AEGISVAULT</strong>
+                    <span>RAG Privacy Guard</span>
+                </div>
+            </div>
+
+            <nav class="nav-group" aria-label="Core operations">
+                <div class="nav-label">Core Operations</div>
+                <button id="nav-chat" class="nav-item active" type="button" onclick="switchTab(event, 'chat')">
+                    <i class="fas fa-terminal"></i>
+                    Secure Chat
+                </button>
+                <button id="nav-ingest" class="nav-item" type="button" onclick="switchTab(event, 'ingest')">
+                    <i class="fas fa-cloud-arrow-up"></i>
+                    Data Ingestion
+                </button>
+            </nav>
+
+            <nav class="nav-group" aria-label="Monitoring">
+                <div class="nav-label">Monitoring</div>
+                <button id="nav-audit" class="nav-item" type="button" onclick="switchTab(event, 'audit')">
+                    <i class="fas fa-list-check"></i>
+                    Audit Explorer
+                </button>
+                <button id="nav-policy" class="nav-item" type="button" onclick="switchTab(event, 'policy')">
+                    <i class="fas fa-sliders"></i>
+                    Security Policy
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="secure-card">
+                    <div class="status-pill">
+                        <span class="status-dot"></span>
+                        AES-256 Protected
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main>
+            <header class="topbar">
+                <div class="title-stack">
+                    <span class="eyebrow">Glassmorphism Control Center</span>
+                    <h1 id="view-title">Secure Inference Environment</h1>
+                </div>
+                <div class="system-status">
+                    <div class="status-pill"><i class="fas fa-database"></i> ChromaDB</div>
+                    <div class="status-pill"><i class="fas fa-share-nodes"></i> Neo4j Graph</div>
+                    <div class="status-pill"><i class="fas fa-user-shield"></i> employee_access</div>
+                </div>
+            </header>
+
+            <section class="pipeline-panel" aria-label="Security pipeline">
+                <div class="pipeline-flow" id="pipeline-flow">
+                    <div class="pipeline-node" data-layer="scrub">
+                        <div class="node-icon"><i class="fas fa-filter"></i></div>
+                        <span class="node-label">L1 Scrub</span>
+                    </div>
+                    <div class="pipeline-node" data-layer="route">
+                        <div class="node-icon"><i class="fas fa-route"></i></div>
+                        <span class="node-label">L2 Route</span>
+                    </div>
+                    <div class="pipeline-node" data-layer="rbac">
+                        <div class="node-icon"><i class="fas fa-user-lock"></i></div>
+                        <span class="node-label">L3 RBAC</span>
+                    </div>
+                    <div class="pipeline-node" data-layer="context">
+                        <div class="node-icon"><i class="fas fa-calculator"></i></div>
+                        <span class="node-label">L4 Context</span>
+                    </div>
+                    <div class="pipeline-node" data-layer="sanitize">
+                        <div class="node-icon"><i class="fas fa-user-shield"></i></div>
+                        <span class="node-label">L5 Sanitize</span>
+                    </div>
+                    <div class="pipeline-node" data-layer="audit">
+                        <div class="node-icon"><i class="fas fa-clipboard-list"></i></div>
+                        <span class="node-label">L6 Audit</span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="control-grid">
+                <section id="chat-view" class="glass-panel view-panel">
+                    <div class="panel-header">
+                        <div class="panel-heading">
+                            <i class="fas fa-circle-check ok"></i>
+                            End-to-End Secure Chat
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            <button type="button" class="status-pill" onclick="clearChat()" style="cursor:pointer; background: rgba(124, 58, 237, 0.15); border-color: var(--violet); color: var(--violet);">
+                                <i class="fas fa-plus"></i> NEW SESSION
+                            </button>
+                            <div class="status-pill">Session <span id="session-id">NEW</span></div>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages" id="chat-log">
+                        <div class="bubble bot">
+                            Systems operational. Ready to process your query through the AegisVault privacy stack.
+                        </div>
+                    </div>
+
+                    <form class="chat-form" onsubmit="sendMessage(event)">
+                        <div class="input-shell">
+                            <i class="fas fa-fingerprint"></i>
+                            <input id="user-input" type="text" placeholder="Query the secure repository..." autocomplete="off">
+                        </div>
+                        <button id="send-button" class="icon-button" type="submit" title="Send query">
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                    </form>
+                </section>
+
+                <section id="ingest-view" class="glass-panel view-panel hidden">
+                    <div class="panel-header">
+                        <div class="panel-heading">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            Vault Ingestion Pipeline
+                        </div>
+                        <div class="status-pill">Sync Mode</div>
+                    </div>
+                    <div class="ingest-body">
+                        <div>
+                            <div id="drop-zone" class="drop-zone" role="button" tabindex="0" onclick="document.getElementById('file-input').click()">
+                                <div class="drop-icon"><i class="fas fa-file-shield"></i></div>
+                                <h2>Drop documents into the vault</h2>
+                                <p>Files are scrubbed, classified, embedded, and stored with employee ACL metadata.</p>
+                                <input id="file-input" class="hidden" type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv" onchange="handleFileUpload(event)">
+                            </div>
+                            <div id="ingest-results"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="audit-view" class="glass-panel view-panel hidden">
+                    <div class="panel-header">
+                        <div class="panel-heading">
+                            <i class="fas fa-list-check"></i>
+                            Audit Explorer
+                        </div>
+                        <div class="status-pill">Local Session</div>
+                    </div>
+                    <div class="chat-messages">
+                        <div id="wide-audit-stream" class="audit-stream">
+                            <div class="audit-event">
+                                <strong>No local events yet</strong>
+                                <span>Queries and ingestions from this browser session appear here.</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="policy-view" class="glass-panel view-panel hidden">
+                    <div class="panel-header">
+                        <div class="panel-heading">
+                            <i class="fas fa-sliders"></i>
+                            Security Policy
+                        </div>
+                        <div class="status-pill">Active</div>
+                    </div>
+                    <div class="chat-messages">
+                        <div class="trace-card glass-panel">
+                            <h3><i class="fas fa-lock"></i> Runtime Defaults</h3>
+                            <div class="trace-row"><span>Tenant</span><span class="trace-val">default</span></div>
+                            <div class="trace-row"><span>Role</span><span class="trace-val">employee</span></div>
+                            <div class="trace-row"><span>Top K</span><span class="trace-val">5</span></div>
+                            <div class="trace-row"><span>Ingestion</span><span class="trace-val">sync</span></div>
+                        </div>
+                    </div>
+                </section>
+
+                <aside class="inspector">
+                    <div class="metrics">
+                        <div class="metric">
+                            <label>Latency</label>
+                            <strong id="stat-latency">0ms</strong>
+                        </div>
+                        <div class="metric">
+                            <label>Threats</label>
+                            <strong id="stat-threats" class="ok">0</strong>
+                        </div>
+                    </div>
+
+                    <div class="trace-card glass-panel">
+                        <h3><i class="fas fa-microscope"></i> Real-Time Logic Trace</h3>
+                        <div class="trace-row"><span>Trace ID</span><span class="trace-val" id="trace-id">-</span></div>
+                        <div class="trace-row"><span>Chunks Used</span><span class="trace-val" id="trace-chunks">0</span></div>
+                        <div class="trace-row"><span>RBAC Blocks</span><span class="trace-val" id="trace-blocked">0</span></div>
+                        <div class="trace-row"><span>PII Redactions</span><span class="trace-val ok" id="trace-pii">0</span></div>
+                        <div class="trace-row"><span>Canary Status</span><span class="trace-val ok" id="trace-canary">CLEAN</span></div>
+                        <div id="leak-warning" class="warning-box">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            Critical: canary leak detected. Boundary violation logged.
+                        </div>
+                    </div>
+
+                    <div class="trace-card glass-panel">
+                        <h3><i class="fas fa-wave-square"></i> Session Events</h3>
+                        <div id="audit-stream" class="audit-stream">
+                            <div class="audit-event">
+                                <strong>Control center ready</strong>
+                                <span>Awaiting secure activity.</span>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const viewTitles = {
+            chat: 'Secure Inference Environment',
+            ingest: 'Vault Ingestion Pipeline',
+            audit: 'Audit Explorer',
+            policy: 'Security Policy'
+        };
+
+        const layerOrder = ['scrub', 'route', 'rbac', 'context', 'sanitize', 'audit'];
+        
+        // Generate persistent session ID for multi-turn support
+        let currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 11).toUpperCase();
+        document.getElementById('session-id').innerText = currentSessionId;
+
+        function switchTab(event, tab) {
+            document.querySelectorAll('.nav-item').forEach((el) => el.classList.remove('active'));
+            if (event?.currentTarget) {
+                event.currentTarget.classList.add('active');
+            }
+
+            document.querySelectorAll('.view-panel').forEach((el) => el.classList.add('hidden'));
+            document.getElementById(`${tab}-view`)?.classList.remove('hidden');
+            document.getElementById('view-title').innerText = viewTitles[tab] || viewTitles.chat;
+        }
+
+        async function sendMessage(event) {
+            event?.preventDefault();
+
+            const input = document.getElementById('user-input');
+            const button = document.getElementById('send-button');
+            const query = input.value.trim();
+            if (!query || button.disabled) return;
+
+            addMessage(query, 'user');
+            addAuditEvent('Query submitted', query);
+            input.value = '';
+            button.disabled = true;
+
+            const stopAnimation = animatePipeline();
+
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'dev-key'
+                    },
+                    body: JSON.stringify({
+                        query,
+                        user_id: 'demo-user-01',
+                        user_roles: ['employee'],
+                        tenant_id: 'default',
+                        top_k: 5,
+                        session_id: currentSessionId
+                    })
+                });
+
+                const data = await parseJsonResponse(response);
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Request failed');
+                }
+
+                updateInspector(data);
+                addMessage(data.response || 'No response text returned.', 'bot');
+                addAuditEvent('Query completed', `${data.chunks_used || 0} chunks, ${data.latency_ms || 0}ms`);
+            } catch (err) {
+                addMessage(`System error: ${err.message}`, 'bot');
+                addAuditEvent('Query failed', err.message, true);
+            } finally {
+                stopAnimation();
+                button.disabled = false;
+                input.focus();
+            }
+        }
+
+        function updateInspector(data) {
+            const traceId = data.trace_id || '';
+            const canaryLeaked = Boolean(data.canary_leaked);
+            const threats = (data.rbac_blocked || 0) + (canaryLeaked ? 1 : 0);
+
+            document.getElementById('trace-id').innerText = traceId ? traceId.substring(0, 14) : '-';
+            document.getElementById('trace-chunks').innerText = data.chunks_used || 0;
+            document.getElementById('trace-blocked').innerText = data.rbac_blocked || 0;
+            document.getElementById('trace-pii').innerText = data.pii_redacted || 0;
+            document.getElementById('stat-latency').innerText = `${data.latency_ms || 0}ms`;
+            document.getElementById('stat-threats').innerText = threats;
+
+            const warning = document.getElementById('leak-warning');
+            const canary = document.getElementById('trace-canary');
+            const chatView = document.getElementById('chat-view');
+            const threatStat = document.getElementById('stat-threats');
+// ...
+        function clearChat() {
+            if (!confirm("Start new secure session? History will be cleared.")) return;
+            
+            const log = document.getElementById('chat-log');
+            log.innerHTML = '<div class="bubble bot"><b>Secure session reset.</b> Ready for new queries.</div>';
+            
+            // Rotate session ID
+            currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 11).toUpperCase();
+            document.getElementById('session-id').innerText = currentSessionId;
+            
+            // Reset stats
+            document.getElementById('stat-threats').innerText = '0';
+            document.getElementById('stat-threats').className = 'ok';
+            document.getElementById('stat-latency').innerText = '0ms';
+            document.getElementById('trace-id').innerText = '-';
+            document.getElementById('trace-chunks').innerText = '0';
+            document.getElementById('trace-blocked').innerText = '0';
+            document.getElementById('trace-pii').innerText = '0';
+            document.getElementById('trace-canary').innerText = 'CLEAN';
+            document.getElementById('trace-canary').className = 'trace-val ok';
+            document.getElementById('leak-warning').classList.add('hidden');
+            document.getElementById('chat-view').classList.remove('pulse-danger');
+        }
+
+            if (canaryLeaked) {
+                warning.classList.add('visible');
+                canary.innerText = 'LEAKED';
+                canary.className = 'trace-val danger';
+                threatStat.className = 'danger';
+                chatView.classList.add('pulse-danger');
+            } else {
+                warning.classList.remove('visible');
+                canary.innerText = 'CLEAN';
+                canary.className = 'trace-val ok';
+                threatStat.className = threats > 0 ? 'danger' : 'ok';
+                chatView.classList.remove('pulse-danger');
+            }
+        }
+
+        function addMessage(text, side) {
+            const log = document.getElementById('chat-log');
+            const bubble = document.createElement('div');
+            bubble.className = `bubble ${side}`;
+            bubble.innerText = text;
+            log.appendChild(bubble);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function handleFileUpload(event) {
+            const input = event.target;
+            await uploadFile(input.files?.[0]);
+            input.value = '';
+        }
+
+        async function uploadFile(file) {
+            if (!file) return;
+
+            const results = document.getElementById('ingest-results');
+            results.replaceChildren(createResultCard('Analyzing document', file.name, false, true));
+            addAuditEvent('Ingestion started', file.name);
+
+            const stopAnimation = animatePipeline();
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('tenant_id', 'default');
+            formData.append('acl_roles', 'employee');
+
+            try {
+                const response = await fetch('/ingest/file?async=false', {
+                    method: 'POST',
+                    headers: { 'X-API-Key': 'dev-key' },
+                    body: formData
+                });
+
+                const data = await parseJsonResponse(response);
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Upload failed');
+                }
+
+                results.replaceChildren(renderIngestResult(data));
+                addAuditEvent('Ingestion completed', `${data.status}: ${data.doc_id}`);
+            } catch (err) {
+                results.replaceChildren(createResultCard('Ingestion failed', err.message, true));
+                addAuditEvent('Ingestion failed', err.message, true);
+            } finally {
+                stopAnimation();
+            }
+        }
+
+        function renderIngestResult(data) {
+            const card = createResultCard('Vault ingestion success', data.status || 'processed');
+            [
+                ['Doc ID', data.doc_id || '-'],
+                ['Sensitivity', data.sensitivity_class || '-'],
+                ['Chunks Stored', data.chunks_stored ?? 0],
+                ['PII Found', (data.pii_entities_found || []).join(', ') || 'None'],
+                ['Text Modified', data.text_modified ? 'Yes' : 'No']
+            ].forEach(([label, value]) => card.appendChild(createTraceRow(label, value)));
+
+            if (data.reason) {
+                card.appendChild(createTraceRow('Reason', data.reason));
+            }
+            return card;
+        }
+
+        function createResultCard(title, detail, failed = false, loading = false) {
+            const card = document.createElement('div');
+            card.className = `result-card${failed ? ' failed' : ''}`;
+
+            const heading = document.createElement('div');
+            heading.className = 'result-title';
+
+            const icon = document.createElement('i');
+            icon.className = loading ? 'fas fa-cog fa-spin' : failed ? 'fas fa-circle-xmark' : 'fas fa-circle-check';
+            icon.classList.add(failed ? 'danger' : 'ok');
+
+            const text = document.createElement('span');
+            text.innerText = title;
+            heading.append(icon, text);
+
+            const sub = document.createElement('div');
+            sub.className = 'trace-val';
+            sub.style.textAlign = 'left';
+            sub.innerText = detail;
+
+            card.append(heading, sub);
+            return card;
+        }
+
+        function createTraceRow(label, value) {
+            const row = document.createElement('div');
+            row.className = 'trace-row';
+
+            const key = document.createElement('span');
+            key.innerText = label;
+
+            const val = document.createElement('span');
+            val.className = 'trace-val';
+            val.innerText = String(value);
+
+            row.append(key, val);
+            return row;
+        }
+
+        function addAuditEvent(title, detail, failed = false) {
+            const streams = [document.getElementById('audit-stream'), document.getElementById('wide-audit-stream')];
+            streams.forEach((stream) => {
+                if (!stream) return;
+                const event = document.createElement('div');
+                event.className = 'audit-event';
+
+                const strong = document.createElement('strong');
+                strong.innerText = title;
+                if (failed) strong.classList.add('danger');
+
+                const span = document.createElement('span');
+                span.innerText = `${new Date().toLocaleTimeString()} - ${detail}`;
+
+                event.append(strong, span);
+                if (stream.children.length === 1 && stream.firstElementChild?.innerText.includes('No local events')) {
+                    stream.replaceChildren();
+                }
+                stream.prepend(event);
+            });
+        }
+
+        function animatePipeline() {
+            let index = 0;
+            const nodes = Array.from(document.querySelectorAll('.pipeline-node'));
+
+            const activate = () => {
+                nodes.forEach((node) => node.classList.remove('processing'));
+                nodes[index % layerOrder.length]?.classList.add('processing');
+                index += 1;
+            };
+
+            activate();
+            const interval = window.setInterval(activate, 280);
+
+            return () => {
+                window.clearInterval(interval);
+                nodes.forEach((node) => node.classList.remove('processing'));
+            };
+        }
+
+        async function parseJsonResponse(response) {
+            try {
+                return await response.json();
+            } catch {
+                return { detail: response.statusText || 'Unexpected server response' };
+            }
+        }
+
+        const dropZone = document.getElementById('drop-zone');
+        dropZone.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                document.getElementById('file-input').click();
+            }
+        });
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', async (event) => {
+            event.preventDefault();
+            dropZone.classList.remove('dragover');
+            await uploadFile(event.dataTransfer.files?.[0]);
+        });
+    </script>
+</body>
+</html>

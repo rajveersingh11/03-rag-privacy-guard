@@ -15,6 +15,7 @@ from src.aegisVault.entity.config_entity import (
     AegisVaultConfig, DifferentialPrivacyConfig, PIIConfig,
     SemanticRouterConfig, RetrievalConfig, GraphConfig,
     LLMConfig, OutputSanitizerConfig, AuditConfig, CeleryConfig,
+    AppConfig, PathsConfig,
 )
 
 
@@ -34,10 +35,12 @@ def _load_yaml(path: Path) -> dict:
 @lru_cache(maxsize=1)
 def get_config() -> AegisVaultConfig:
     """Singleton config loader — cached after first call."""
-    cfg  = _load_yaml(CONFIG_FILE_PATH)   # noqa: F841 (used for app/paths)
+    cfg  = _load_yaml(CONFIG_FILE_PATH)
     p    = _load_yaml(PARAMS_FILE_PATH)
 
     return AegisVaultConfig(
+        app=AppConfig(**cfg["app"]),
+        paths=PathsConfig(**cfg["paths"]),
         dp=DifferentialPrivacyConfig(**p["differential_privacy"]),
         pii=PIIConfig(**p["pii"]),
         semantic_router=SemanticRouterConfig(**p["semantic_router"]),

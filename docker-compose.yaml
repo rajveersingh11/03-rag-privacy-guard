@@ -1,0 +1,42 @@
+services:
+  # ─── Redis (Task Broker for Celery) ───────────────────────
+  redis:
+    image: redis:alpine
+    container_name: aegis_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # ─── MySQL (Audit Logging & Metadata) ─────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: aegis_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: aegisdb
+      MYSQL_USER: aegis
+      MYSQL_PASSWORD: aegis_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Automatically run migrations on startup
+      - ./src/aegisVault/db/migrations:/docker-entrypoint-initdb.d
+    restart: always
+
+  # ─── Neo4j (Layer 3 GraphRAG Boundaries) ──────────
+  neo4j:
+    image: neo4j:5.12
+    container_name: aegis_neo4j
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    volumes:
+      - neo4j_data:/data
+    restart: always
+
+volumes:
+  mysql_data:
+  neo4j_data:

@@ -8,9 +8,9 @@ Auth: X-API-Key header (set API_KEY in .env)
 """
 
 import os
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -26,6 +26,8 @@ class QueryRequest(BaseModel):
                                         example=["employee"])
     tenant_id:  str             = Field(default="default", example="acme_corp")
     top_k:      int             = Field(default=5, ge=1, le=20)
+    session_id: Optional[str]   = Field(default=None, example="sess_001")
+
 
 
 class QueryResponse(BaseModel):
@@ -52,6 +54,7 @@ def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
 @router.post("", response_model=QueryResponse)
 def run_query(
     req: QueryRequest,
+    request: Request,
     _key: str = Depends(verify_api_key),
 ):
     """
@@ -63,9 +66,7 @@ def run_query(
     - Layer 5: Output sanitizer (PII scrub + canary check)
     - Layer 6: Privacy-safe audit log
     """
-    from aegisVault.app.main import state
-
-    pipeline = state.get("inference_pipeline")
+    pipeline = getattr(request.app.state, "inference_pipeline", None)
     if not pipeline:
         raise HTTPException(status_code=503, detail="Inference pipeline not ready")
 
@@ -75,6 +76,7 @@ def run_query(
         user_roles=req.user_roles,
         tenant_id=req.tenant_id,
         top_k=req.top_k,
+        session_id=req.session_id,
     )
 
     return QueryResponse(
