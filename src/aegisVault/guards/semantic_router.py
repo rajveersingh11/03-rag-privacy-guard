@@ -15,10 +15,10 @@ For development: uses a distilbert zero-shot classifier as fallback.
 import re
 from typing import List, Optional, Dict
 
-from aegisVault.entity.artifact_entity import RouteDecisionArtifact
-from aegisVault.entity.config_entity import SemanticRouterConfig
-from aegisVault.constants import INJECTION_CATEGORIES
-from aegisVault.utils.common import get_logger
+from src.aegisVault.entity.artifact_entity import RouteDecisionArtifact
+from src.aegisVault.entity.config_entity import SemanticRouterConfig
+from src.aegisVault.constants import INJECTION_CATEGORIES
+from src.aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 

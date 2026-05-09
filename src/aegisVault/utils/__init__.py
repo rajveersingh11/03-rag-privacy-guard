@@ -4,7 +4,7 @@ AegisVault Utils
 Shared helper functions used across all modules.
 """
 
-from aegisVault.utils.common import (
+from src.aegisVault.utils.common import (
     get_logger,
     hash_text,
     ensure_dir,

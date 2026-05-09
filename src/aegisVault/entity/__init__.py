@@ -8,7 +8,7 @@ Config entities  : map params.yaml sections to typed objects
 Artifact entities: typed outputs from each pipeline stage
 """
 
-from aegisVault.entity.config_entity import (
+from src.aegisVault.entity.config_entity import (
     AegisVaultConfig,
     DifferentialPrivacyConfig,
     PIIConfig,
@@ -20,7 +20,7 @@ from aegisVault.entity.config_entity import (
     AuditConfig,
     CeleryConfig,
 )
-from aegisVault.entity.artifact_entity import (
+from src.aegisVault.entity.artifact_entity import (
     PIIScanArtifact,
     DPEmbeddingArtifact,
     IngestionArtifact,

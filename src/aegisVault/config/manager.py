@@ -10,8 +10,8 @@ import yaml
 from pathlib import Path
 from functools import lru_cache
 
-from aegisVault.constants import CONFIG_FILE_PATH, PARAMS_FILE_PATH
-from aegisVault.entity.config_entity import (
+from src.aegisVault.constants import CONFIG_FILE_PATH, PARAMS_FILE_PATH
+from src.aegisVault.entity.config_entity import (
     AegisVaultConfig, DifferentialPrivacyConfig, PIIConfig,
     SemanticRouterConfig, RetrievalConfig, GraphConfig,
     LLMConfig, OutputSanitizerConfig, AuditConfig, CeleryConfig,

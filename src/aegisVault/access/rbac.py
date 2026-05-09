@@ -12,8 +12,8 @@ Used by:
 
 from typing import List, Dict, Any
 
-from aegisVault.constants import SENSITIVITY_LEVELS, ROLE_CLEARANCE
-from aegisVault.utils.common import get_logger, sensitivity_index
+from src.aegisVault.constants import SENSITIVITY_LEVELS, ROLE_CLEARANCE
+from src.aegisVault.utils.common import get_logger, sensitivity_index
 
 logger = get_logger(__name__)
 

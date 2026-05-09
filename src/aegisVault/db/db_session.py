@@ -12,7 +12,7 @@ from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 
-from aegisVault.utils.common import get_logger
+from src.aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 

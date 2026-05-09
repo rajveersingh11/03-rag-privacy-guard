@@ -14,9 +14,9 @@ from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-from aegisVault.entity.artifact_entity import OutputSanitizationArtifact
-from aegisVault.entity.config_entity import OutputSanitizerConfig, PIIConfig
-from aegisVault.utils.common import get_logger
+from src.aegisVault.entity.artifact_entity import OutputSanitizationArtifact
+from src.aegisVault.entity.config_entity import OutputSanitizerConfig, PIIConfig
+from src.aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 

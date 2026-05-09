@@ -10,9 +10,9 @@ isolated in the graph, not just filtered by metadata.
 """
 
 from typing import List, Dict, Any, Optional
-from aegisVault.entity.config_entity import GraphConfig
-from aegisVault.utils.common import get_logger, sensitivity_index
-from aegisVault.constants import ROLE_CLEARANCE, SENSITIVITY_LEVELS
+from src.aegisVault.entity.config_entity import GraphConfig
+from src.aegisVault.utils.common import get_logger, sensitivity_index
+from src.aegisVault.constants import ROLE_CLEARANCE, SENSITIVITY_LEVELS
 
 logger = get_logger(__name__)
 

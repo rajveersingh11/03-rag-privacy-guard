@@ -18,10 +18,10 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-from aegisVault.entity.artifact_entity import PIIScanArtifact
-from aegisVault.entity.config_entity import PIIConfig
-from aegisVault.constants import PII_SEVERITY
-from aegisVault.utils.common import get_logger, ensure_dir, hash_text
+from src.aegisVault.entity.artifact_entity import PIIScanArtifact
+from src.aegisVault.entity.config_entity import PIIConfig
+from src.aegisVault.constants import PII_SEVERITY
+from src.aegisVault.utils.common import get_logger, ensure_dir, hash_text
 
 logger = get_logger(__name__)
 

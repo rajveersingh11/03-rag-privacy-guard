@@ -10,7 +10,7 @@ InferencePipeline  — real-time, called per user query
                      Layer 2 (route) → Layer 3 (RBAC) → LLM → Layer 5 (sanitize) → Layer 6 (audit)
 """
 
-from aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
-from aegisVault.pipeline.inference_pipeline import InferencePipeline
+from .ingestion_pipeline import IngestionPipeline
+from .inference_pipeline import InferencePipeline
 
 __all__ = ["IngestionPipeline", "InferencePipeline"]

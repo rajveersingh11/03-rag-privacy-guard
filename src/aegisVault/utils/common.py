@@ -27,7 +27,7 @@ def ensure_dir(path: str | Path) -> Path:
 
 
 def sensitivity_index(level: str) -> int:
-    from aegisVault.constants import SENSITIVITY_LEVELS
+    from src.aegisVault.constants import SENSITIVITY_LEVELS
     return SENSITIVITY_LEVELS.index(level) if level in SENSITIVITY_LEVELS else 0
 
 
