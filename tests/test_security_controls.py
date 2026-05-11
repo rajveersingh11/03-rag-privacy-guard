@@ -25,24 +25,24 @@ from aegisVault.guards.semantic_router import SemanticRouter
 from aegisVault.pipeline.inference_pipeline import InferencePipeline
 from aegisVault.utils.common import parse_metadata_list
 
-
 def make_config(**overrides):
     cfg = AegisVaultConfig(
-        app=AppConfig("AegisVault", "1.0.0", "127.0.0.1", 8000, False),
-        paths=PathsConfig("./data", "./data/chroma_db", "./data/quarantine", "./data/audit_logs"),
-        dp=DifferentialPrivacyConfig(1.0, 1.0, True),
-        pii=PIIConfig(0.7, "quarantine", "redact", "redact", "tag", ["EMAIL_ADDRESS"]),
+        app=AppConfig(name="AegisVault", version="1.0.0", host="127.0.0.1", port=8000, debug=False),
+        paths=PathsConfig(data_dir="./data", chroma_dir="./data/chroma_db", quarantine_dir="./data/quarantine", audit_log_dir="./data/audit_logs"),
+        dp=DifferentialPrivacyConfig(epsilon=1.0, sensitivity=1.0, enabled=True),
+        pii=PIIConfig(confidence_threshold=0.7, on_critical="quarantine", on_high="redact", on_medium="redact", on_low="tag", entities_to_detect=["EMAIL_ADDRESS"], compliance_mode="none"),
         semantic_router=SemanticRouterConfig(
-            "guard", "facebook/bart-large-mnli", "cpu", 0.85,
-            ["prompt_injection"], True,
+            model_id="guard", fallback_model="facebook/bart-large-mnli", device="cpu", confidence_threshold=0.85,
+            block_categories=["prompt_injection"], fail_closed=True, classifier_backend="local_hf"
         ),
-        retrieval=RetrievalConfig(2, "test", "./data/chroma_db", "test-model", 0.5),
-        graph=GraphConfig("bolt://local", "neo4j", "password", True, True),
-        llm=LLMConfig("test-model", 0.0, 128, "Answer from context only."),
-        output_sanitizer=OutputSanitizerConfig(["CANARY"], True, False),
-        audit=AuditConfig(True, 30, "INFO"),
-        celery=CeleryConfig("redis://local", "redis://local", "json", 1, "./data/quarantine"),
+        retrieval=RetrievalConfig(top_k=2, chroma_collection="test", chroma_persist_dir="./data/chroma_db", embedding_model="test-model", similarity_threshold=0.5),
+        graph=GraphConfig(neo4j_uri="bolt://local", neo4j_user="neo4j", neo4j_password="password", tenant_isolation=True, enforce_acl_on_nodes=True),
+        llm=LLMConfig(model_id="test-model", temperature=0.0, max_tokens=128, system_prompt="Answer from context only."),
+        output_sanitizer=OutputSanitizerConfig(canary_tokens=["CANARY"], alert_on_canary=True, re_scrub_output=False),
+        audit=AuditConfig(scrub_before_log=True, retention_days=30, log_level="INFO"),
+        celery=CeleryConfig(broker_url="redis://local", result_backend="redis://local", task_serializer="json", worker_concurrency=1, quarantine_dir="./data/quarantine"),
     )
+    return cfg
     for key, value in overrides.items():
         cfg = replace(cfg, **{key: value})
     return cfg
@@ -73,7 +73,7 @@ def test_rbac_does_not_use_substring_acl_matching():
 
 
 def test_semantic_router_fail_closed_blocks_classifier_errors():
-    cfg = SemanticRouterConfig("guard", "missing", "cpu", 0.85, ["prompt_injection"], True)
+    cfg = SemanticRouterConfig(model_id="guard", fallback_model="missing", device="cpu", confidence_threshold=0.85, block_categories=["prompt_injection"], fail_closed=True, classifier_backend="local_hf")
     router = SemanticRouter(cfg)
     router._get_classifier = lambda: (_ for _ in ()).throw(RuntimeError("model unavailable"))
 
@@ -85,8 +85,8 @@ def test_semantic_router_fail_closed_blocks_classifier_errors():
 
 def test_output_sanitizer_redacts_canary_without_pii_scan():
     sanitizer = OutputSanitizer(
-        OutputSanitizerConfig(["CANARY-123"], True, False),
-        PIIConfig(0.7, "quarantine", "redact", "redact", "tag", []),
+        OutputSanitizerConfig(canary_tokens=["CANARY-123"], alert_on_canary=True, re_scrub_output=False),
+        PIIConfig(confidence_threshold=0.7, on_critical="quarantine", on_high="redact", on_medium="redact", on_low="tag", entities_to_detect=[], compliance_mode="none"),
     )
 
     result = sanitizer.sanitize("The token is CANARY-123", "trace")
@@ -96,7 +96,7 @@ def test_output_sanitizer_redacts_canary_without_pii_scan():
 
 
 def test_quarantine_encrypts_raw_content(tmp_path, monkeypatch):
-    monkeypatch.setenv("QUARANTINE_ENCRYPTION_KEY", "unit-test-secret")
+    monkeypatch.setenv("QUARANTINE_ENCRYPTION_KEY", "gE4rQjW9H0yRzTqP4sD9NqgN4Q9XhK3yNfG6fH4fQkM=")
     scrubber = IngestionScrubber.__new__(IngestionScrubber)
     scrubber.quarantine_dir = tmp_path
 
@@ -135,7 +135,7 @@ def test_inference_uses_graph_doc_ids_and_similarity_threshold(monkeypatch):
         class chat:
             class completions:
                 @staticmethod
-                def create(model, messages, temperature, max_tokens):
+                def create(model, messages, temperature, max_tokens, **kwargs):
                     assert "allowed context" in messages[-1]["content"]
                     assert "low score" not in messages[-1]["content"]
                     return SimpleNamespace(

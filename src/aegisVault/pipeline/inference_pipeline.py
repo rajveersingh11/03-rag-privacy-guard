@@ -52,6 +52,26 @@ class InferencePipeline:
 
     # ── Main entry point ───────────────────────────────────────────────
 
+    def _check_dp_budget(self, user_id: str) -> bool:
+        import os
+        from aegisVault.app.metrics import aegis_dp_budget_exceeded_total
+        max_queries = int(os.environ.get("MAX_DP_QUERIES_PER_USER_PER_DAY", "100"))
+        
+        if not hasattr(self, "_dp_budgets"):
+            self._dp_budgets = {}
+            self._dp_budgets_date = time.strftime("%Y-%m-%d")
+            
+        current_date = time.strftime("%Y-%m-%d")
+        if current_date != self._dp_budgets_date:
+            self._dp_budgets = {}
+            self._dp_budgets_date = current_date
+            
+        self._dp_budgets[user_id] = self._dp_budgets.get(user_id, 0) + 1
+        if self._dp_budgets[user_id] > max_queries:
+            aegis_dp_budget_exceeded_total.inc()
+            return False
+        return True
+
     def query(
         self,
         user_query:  str,
@@ -60,9 +80,16 @@ class InferencePipeline:
         tenant_id:   str = "default",
         top_k:       int = None,
         session_id:  str = None,
+        trace_id:    Optional[str] = None,
     ) -> InferenceArtifact:
-        trace_id  = str(uuid.uuid4())
+        trace_id  = trace_id or str(uuid.uuid4())
         start_ms  = time.time()
+        
+        if self.cfg.dp.enabled and not self._check_dp_budget(user_id):
+            logger.error(f"[{trace_id}] DP budget exceeded for user {user_id}")
+            return self._blocked_response(trace_id, user_query, "dp_budget_exceeded",
+                                          int((time.time()-start_ms)*1000))
+
         user_roles = user_roles or ["employee"]
         top_k     = top_k or self.cfg.retrieval.top_k
         session_id = session_id or "default"
@@ -164,25 +191,48 @@ class InferencePipeline:
         ]
 
         # ── LLM call ──────────────────────────────────────────────────
-        if hasattr(self.llm, "chat") and hasattr(self.llm.chat, "completions"):
-            # OpenAI SDK style
-            response = self.llm.chat.completions.create(
-                model=self.cfg.llm.model_id,
-                messages=messages,
-                temperature=self.cfg.llm.temperature,
-                max_tokens=self.cfg.llm.max_tokens,
-            ).choices[0].message.content
-        else:
-            # LangChain BaseChatModel style (Gemini)
-            from langchain_core.messages import HumanMessage, SystemMessage
-            lc_messages = []
-            for m in messages:
-                if m["role"] == "system":
-                    lc_messages.append(SystemMessage(content=m["content"]))
-                else:
-                    lc_messages.append(HumanMessage(content=m["content"]))
+        from tenacity import retry, wait_exponential, stop_after_attempt
+        
+        # Simple circuit breaker state (stored on the class instance, but since pipeline is stateful per worker, 
+        # it might be better to just use a global or instance variable)
+        if not hasattr(self, "_llm_failures"):
+            self._llm_failures = []
             
-            response = self.llm.invoke(lc_messages).content
+        now = time.time()
+        self._llm_failures = [t for t in self._llm_failures if now - t < 60]
+        if len(self._llm_failures) >= 5:
+            from aegisVault.app.metrics import aegis_llm_circuit_open_total
+            aegis_llm_circuit_open_total.inc()
+            response = "Service temporarily unavailable. Please try again."
+        else:
+            @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3), reraise=True)
+            def _call_llm():
+                if hasattr(self.llm, "chat") and hasattr(self.llm.chat, "completions"):
+                    return self.llm.chat.completions.create(
+                        model=self.cfg.llm.model_id,
+                        messages=messages,
+                        temperature=self.cfg.llm.temperature,
+                        max_tokens=self.cfg.llm.max_tokens,
+                        timeout=float(os.environ.get("LLM_TIMEOUT_SECONDS", "30"))
+                    ).choices[0].message.content
+                else:
+                    from langchain_core.messages import HumanMessage, SystemMessage
+                    lc_messages = []
+                    for m in messages:
+                        if m["role"] == "system":
+                            lc_messages.append(SystemMessage(content=m["content"]))
+                        else:
+                            lc_messages.append(HumanMessage(content=m["content"]))
+                    
+                    return self.llm.invoke(lc_messages).content
+                    
+            try:
+                import os
+                response = _call_llm()
+            except Exception as e:
+                logger.error(f"LLM call failed permanently: {e}")
+                self._llm_failures.append(time.time())
+                response = "Service temporarily unavailable. Please try again."
 
         # ── Layer 5: Output sanitization ──────────────────────────────
         sanitized = self.sanitizer.sanitize(response, trace_id)
@@ -321,20 +371,28 @@ class InferencePipeline:
                 INSERT INTO audit_log
                   (id, trace_id, user_id, query, response, chunks_used,
                    rbac_blocked, pii_redacted, violations, latency_ms, timestamp,
-                   tenant_id, canary_leaked, model, route_action, route_category)
+                   tenant_id, canary_leaked, model, route_action, route_category, checksum)
                 VALUES
                   (:id, :tid, :uid, :q, :r, :cu, :rb, :pr, :v, :lm, :ts,
-                   :tenant_id, :canary, :model, :route_action, :route_category)
+                   :tenant_id, :canary, :model, :route_action, :route_category, :checksum)
             """)
+            
+            ts = datetime.now(UTC)
+            import hashlib
+            query_hash = hashlib.sha256(audit_query.encode('utf-8')).hexdigest()
+            checksum_str = f"{trace_id}{user_id}{query_hash}{ts.isoformat()}"
+            checksum = hashlib.sha256(checksum_str.encode('utf-8')).hexdigest()
+            
             params = {
                 "id": trace_id, "tid": trace_id, "uid": user_id,
                 "q": audit_query, "r": audit_response,
                 "cu": chunks_used, "rb": blocked, "pr": pii_redacted,
-                "v": json.dumps(violations), "lm": latency_ms, "ts": datetime.now(UTC),
+                "v": json.dumps(violations), "lm": latency_ms, "ts": ts,
                 "tenant_id": tenant_id, "canary": canary_leaked,
                 "model": self.cfg.llm.model_id,
                 "route_action": route_action,
                 "route_category": route_category,
+                "checksum": checksum,
             }
 
             if self.db:

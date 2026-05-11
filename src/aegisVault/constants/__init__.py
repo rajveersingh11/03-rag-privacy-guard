@@ -36,6 +36,16 @@ PII_SEVERITY = {
     "CRYPTO":           "high",
 }
 
+GDPR_RELEVANT_ENTITIES = [
+    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+    "IP_ADDRESS", "LOCATION", "DATE_TIME", "IBAN_CODE"
+]
+
+HIPAA_RELEVANT_ENTITIES = [
+    "PERSON", "MEDICAL_LICENSE", "US_SSN", "PHONE_NUMBER",
+    "EMAIL_ADDRESS", "LOCATION", "DATE_TIME", "US_DRIVER_LICENSE"
+]
+
 # ── Injection intent categories ────────────────────────────
 INJECTION_CATEGORIES = [
     "prompt_injection",

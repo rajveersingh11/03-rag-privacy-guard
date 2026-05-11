@@ -10,26 +10,30 @@ Auth: X-API-Key header
 """
 
 import os
-import secrets
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query, Request
 from pydantic import BaseModel
+
+from aegisVault.app.deps import verify_api_key, limiter
+from aegisVault.utils.common import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
 MAX_INGEST_BYTES = int(os.environ.get("MAX_INGEST_BYTES", str(5 * 1024 * 1024)))
 ALLOWED_EXTENSIONS = {
     ext.strip().lower()
-    for ext in os.environ.get("ALLOWED_INGEST_EXTENSIONS", ".txt,.md,.csv").split(",")
+    for ext in os.environ.get("ALLOWED_INGEST_EXTENSIONS", ".txt,.md,.csv,.pdf").split(",")
     if ext.strip()
 }
 ALLOWED_CONTENT_TYPES = {
     ct.strip().lower()
     for ct in os.environ.get(
         "ALLOWED_INGEST_CONTENT_TYPES",
-        "text/plain,text/markdown,text/csv,application/octet-stream",
+        "text/plain,text/markdown,text/csv,application/pdf,application/octet-stream",
     ).split(",")
     if ct.strip()
 }
@@ -48,19 +52,17 @@ class IngestResponse(BaseModel):
     async_task_id:      Optional[str] = None
 
 
-# ── Auth ───────────────────────────────────────────────────────────────
+# ── Hooks ──────────────────────────────────────────────────────────────
 
-def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
-    expected = os.environ.get("API_KEY")
-    if not expected:
-        raise HTTPException(status_code=503, detail="API key is not configured")
-    if not secrets.compare_digest(x_api_key, expected):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return x_api_key
+def scan_file(path: str) -> bool:
+    """Stub for virus/malware scanning (e.g. ClamAV)."""
+    logger.warning("No virus scanner configured for file uploads. Skipping scan.")
+    return True
 
 
 async def _read_limited_text_file(file: UploadFile) -> str:
-    suffix = Path(file.filename or "").suffix.lower()
+    filename = Path(file.filename or "unknown").name
+    suffix = Path(filename).suffix.lower()
     content_type = (file.content_type or "application/octet-stream").lower()
 
     if suffix not in ALLOWED_EXTENSIONS:
@@ -70,6 +72,8 @@ async def _read_limited_text_file(file: UploadFile) -> str:
         )
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+
+    scan_file(filename)
 
     content_bytes = await file.read(MAX_INGEST_BYTES + 1)
     if len(content_bytes) > MAX_INGEST_BYTES:
@@ -86,10 +90,11 @@ async def _read_limited_text_file(file: UploadFile) -> str:
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 @router.post("/file", response_model=IngestResponse)
+@limiter.limit("10/minute")
 async def ingest_file(
     request:    Request,
-    file:       UploadFile = File(..., description="Plain text file (.txt, .md, .csv)"),
-    tenant_id:  str        = Form(default="default"),
+    file:       UploadFile = File(..., description="Plain text file (.txt, .md, .csv, .pdf)"),
+    tenant_id:  str        = Form(default="default", pattern=r"^[a-zA-Z0-9_\-]{1,64}$"),
     acl_roles:  str        = Form(default="employee",
                                   description="Comma-separated roles, e.g. employee,manager"),
     run_async:  bool       = Query(default=True, alias="async",
@@ -97,15 +102,15 @@ async def ingest_file(
     _key:       str        = Depends(verify_api_key),
 ):
     """
-    Ingest a plain-text file through the full privacy pipeline.
-
+    Ingest a file through the full privacy pipeline.
     Async (default): queues a Celery task → returns immediately with task_id.
     Sync (?async=false): runs pipeline inline → returns full result.
     """
     content = await _read_limited_text_file(file)
+    safe_filename = Path(file.filename or "unknown").name
     metadata = {
-        "source":   file.filename,
-        "filename": file.filename,
+        "source":   safe_filename,
+        "filename": safe_filename,
         "content_type": file.content_type or "text/plain",
     }
     roles = [r.strip() for r in acl_roles.split(",") if r.strip()] or ["employee"]
@@ -133,7 +138,9 @@ async def ingest_file(
     if not pipeline:
         raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")
 
-    result = pipeline.ingest(
+    import asyncio
+    result = await asyncio.to_thread(
+        pipeline.ingest,
         text=content,
         metadata=metadata,
         tenant_id=tenant_id,
@@ -152,11 +159,12 @@ async def ingest_file(
 
 
 @router.post("/text", response_model=IngestResponse)
+@limiter.limit("10/minute")
 async def ingest_text(
     request:    Request,
-    text:       str   = Form(..., description="Raw document text"),
+    text:       str   = Form(..., description="Raw document text", min_length=3),
     source:     str   = Form(default="manual_input"),
-    tenant_id:  str   = Form(default="default"),
+    tenant_id:  str   = Form(default="default", pattern=r"^[a-zA-Z0-9_\-]{1,64}$"),
     acl_roles:  str   = Form(default="employee"),
     _key:       str   = Depends(verify_api_key),
 ):
@@ -165,9 +173,11 @@ async def ingest_text(
     if not pipeline:
         raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")
 
-    result = pipeline.ingest(
+    import asyncio
+    result = await asyncio.to_thread(
+        pipeline.ingest,
         text=text,
-        metadata={"source": source},
+        metadata={"source": Path(source).name},
         tenant_id=tenant_id,
         acl_roles=[r.strip() for r in acl_roles.split(",") if r.strip()] or ["employee"],
     )

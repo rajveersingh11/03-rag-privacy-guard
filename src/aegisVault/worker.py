@@ -34,6 +34,8 @@ celery_app.conf.update(
 )
 
 
+_pipeline_cache = None
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def ingest_document_task(self, text: str, metadata: dict,
                           tenant_id: str = "default",
@@ -42,27 +44,40 @@ def ingest_document_task(self, text: str, metadata: dict,
     Celery task: runs the full ingestion pipeline asynchronously.
     Retries up to 3 times on transient failures.
     """
+    global _pipeline_cache
     try:
-        from langchain_huggingface import HuggingFaceEmbeddings
-        from langchain_community.vectorstores import Chroma
-        from aegisVault.config.manager import get_config
-        from aegisVault.guards.privacy_math import DPEmbedder
-        from aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
+        if _pipeline_cache is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            from langchain_community.vectorstores import Chroma
+            from aegisVault.config.manager import get_config
+            from aegisVault.guards.privacy_math import DPEmbedder
+            from aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
 
-        cfg = get_config()
+            cfg = get_config()
 
-        base_embedder = HuggingFaceEmbeddings(model_name=cfg.retrieval.embedding_model)
-        dp_embedder   = DPEmbedder(base_embedder, cfg.dp.epsilon, cfg.dp.sensitivity) \
-                        if cfg.dp.enabled else base_embedder
+            base_embedder = HuggingFaceEmbeddings(model_name=cfg.retrieval.embedding_model)
+            dp_embedder   = DPEmbedder(base_embedder, cfg.dp.epsilon, cfg.dp.sensitivity) \
+                            if cfg.dp.enabled else base_embedder
 
-        vectorstore = Chroma(
-            collection_name=cfg.retrieval.chroma_collection,
-            embedding_function=dp_embedder,
-            persist_directory=cfg.retrieval.chroma_persist_dir,
-        )
+            chroma_host = os.environ.get("CHROMA_HOST", None)
+            if chroma_host:
+                import chromadb
+                chroma_client = chromadb.HttpClient(host=chroma_host, port=8000)
+                vectorstore = Chroma(
+                    client=chroma_client,
+                    collection_name=cfg.retrieval.chroma_collection,
+                    embedding_function=dp_embedder,
+                )
+            else:
+                vectorstore = Chroma(
+                    collection_name=cfg.retrieval.chroma_collection,
+                    embedding_function=dp_embedder,
+                    persist_directory=cfg.retrieval.chroma_persist_dir,
+                )
 
-        pipeline = IngestionPipeline(config=cfg, vectorstore=vectorstore)
-        result   = pipeline.ingest(
+            _pipeline_cache = IngestionPipeline(config=cfg, vectorstore=vectorstore)
+
+        result   = _pipeline_cache.ingest(
             text=text, metadata=metadata,
             tenant_id=tenant_id, acl_roles=acl_roles or ["employee"],
         )

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aegisvault-api
+  namespace: aegisvault
+spec:
+  type: ClusterIP
+  selector:
+    app: aegisvault-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000

@@ -12,66 +12,65 @@ from typing import Any, Dict, List
 import logging.handlers
 from datetime import datetime
 
+import contextvars
+from pythonjsonlogger import jsonlogger
+import colorlog
+
+# Context vars for structured logging
+trace_id_ctx = contextvars.ContextVar("trace_id", default="")
+tenant_id_ctx = contextvars.ContextVar("tenant_id", default="")
+user_id_ctx = contextvars.ContextVar("user_id", default="")
+
 # Global flag to ensure logging is only setup once
 _LOGGING_INITIALIZED = False
 
-def get_logger(name: str) -> logging.Logger:
-    """
-    Returns a pre-configured logger instance.
-    
-    Why the previous version might not have been working:
-    1. logging.basicConfig(...) only configures the root logger ONCE. 
-       Subsequent calls do nothing.
-    2. No FileHandler was configured, so logs only went to the console.
-    3. The format was fixed and didn't allow for project-wide overrides.
-    """
-    global _LOGGING_INITIALIZED
-    
-    logger = logging.getLogger(name)
-    
-    if not _LOGGING_INITIALIZED:
-        _setup_initial_logging()
-        _LOGGING_INITIALIZED = True
-        
-    return logger
+class ContextFilter(logging.Filter):
+    def filter(self, record):
+        record.trace_id = trace_id_ctx.get()
+        record.tenant_id = tenant_id_ctx.get()
+        record.user_id = user_id_ctx.get()
+        return True
 
-def _setup_initial_logging():
-    """Sets up the root logger with both Stream and File handlers."""
+def setup_logging():
+    """Sets up the root logger with structured JSON or colored output."""
+    global _LOGGING_INITIALIZED
+    if _LOGGING_INITIALIZED:
+        return
+    
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     
-    # Clean existing handlers to avoid duplicates
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
         
-    log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-    formatter = logging.Formatter(log_format)
-    
-    # 1. Console Handler
     console_handler = logging.StreamHandler()
+    console_handler.addFilter(ContextFilter())
+    
+    if os.environ.get("APP_ENV") == "production":
+        formatter = jsonlogger.JsonFormatter(
+            '%(timestamp)s %(level)s %(name)s %(trace_id)s %(tenant_id)s %(user_id)s %(message)s',
+            rename_fields={"levelname": "level", "asctime": "timestamp"}
+        )
+    else:
+        formatter = colorlog.ColoredFormatter(
+            '%(log_color)s%(asctime)s | %(levelname)-8s | [%(trace_id)s] %(name)s | %(message)s',
+            log_colors={
+                'DEBUG':    'cyan',
+                'INFO':     'green',
+                'WARNING':  'yellow',
+                'ERROR':    'red',
+                'CRITICAL': 'red,bg_white',
+            }
+        )
+        
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
-    
-    # 2. File Handler (Attempt to use config path, fallback to ./logs)
-    try:
-        # Avoid circular import by importing inside function
-        from aegisVault.config.manager import get_config
-        cfg = get_config()
-        log_dir = Path(cfg.paths.audit_log_dir)
-    except Exception:
-        log_dir = Path("logs")
-        
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"aegisvault_{datetime.now().strftime('%Y%m%d')}.log"
-    
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8"
-    )
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
-    
-    root_logger.info(f"Logging initialized. File: {log_file}")
+    _LOGGING_INITIALIZED = True
 
+def get_logger(name: str) -> logging.Logger:
+    """Returns a logger instance."""
+    setup_logging()
+    return logging.getLogger(name)
 
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]

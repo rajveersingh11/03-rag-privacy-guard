@@ -2,7 +2,7 @@ import asyncio
 from io import BytesIO
 
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile, Request
 from starlette.datastructures import Headers
 
 from aegisVault.app.routers import ingest
@@ -46,5 +46,7 @@ def test_verify_api_key_requires_configured_secret(monkeypatch):
 
 def test_verify_api_key_accepts_configured_secret(monkeypatch):
     monkeypatch.setenv("API_KEY", "real-secret")
+    from aegisVault.app.deps import init_api_keys
+    init_api_keys()
 
-    assert ingest.verify_api_key("real-secret") == "real-secret"
+    assert ingest.verify_api_key(Request(scope={"type": "http"}), "real-secret") == "real"

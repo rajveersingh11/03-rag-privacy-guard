@@ -12,20 +12,22 @@ Start:
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from aegisVault.utils.common import setup_logging, trace_id_ctx, tenant_id_ctx, user_id_ctx
+setup_logging()
 
 # ── Shared app state ───────────────────────────────────────────────────
 state: dict = {}
 
 # ── UI Serving ──────────────────────────────────────────────────
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
-from fastapi import Request
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
@@ -84,6 +86,27 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger("aegisVault").warning(f"Neo4j unavailable: {e}")
 
+    # ── Canary Tokens ───────────────────────────────────────────────
+    import secrets
+    from aegisVault.utils.common import get_logger
+    
+    if not cfg.output_sanitizer.canary_tokens or "change-me" in cfg.output_sanitizer.canary_tokens[0].lower():
+        canary = f"AEGIS-CANARY-{secrets.token_hex(8).upper()}"
+        cfg.output_sanitizer.canary_tokens = [canary]
+        try:
+            vectorstore.add_texts(
+                texts=[f"This is a canary record. Reference ID: {canary}. Do not share."],
+                metadatas=[{
+                    "doc_id": "system_canary",
+                    "sensitivity_class": "RESTRICTED",
+                    "tenant_id": "system",
+                    "acl_roles": '["admin"]'
+                }]
+            )
+            get_logger("aegisVault.app").info(f"Generated and inserted new canary token: {canary}")
+        except Exception as e:
+            get_logger("aegisVault.app").error(f"Failed to insert canary token: {e}")
+
     # ── Pipelines ───────────────────────────────────────────────────
     app.state.cfg              = cfg
     app.state.vectorstore      = vectorstore
@@ -100,13 +123,35 @@ async def lifespan(app: FastAPI):
 
 
 # ── App factory ────────────────────────────────────────────────────────
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from aegisVault.app.deps import limiter
+import uuid
+import contextvars
+
+# Context var for tracing
+trace_id_ctx = contextvars.ContextVar("trace_id", default="")
+
 def create_app() -> FastAPI:
+    is_prod = os.environ.get("APP_ENV") == "production"
+    
     app = FastAPI(
         title="AegisVault — RAG Privacy Guard",
         version="1.0.0",
         description="2026 Enterprise RAG Security — 6-Layer Privacy Guard",
         lifespan=lifespan,
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_tags=[
+            {"name": "Query", "description": "Guarded real-time query interface"},
+            {"name": "Ingest", "description": "Document ingestion with PII scrubbing and DP embedding"},
+            {"name": "System", "description": "Health probes and metrics"},
+            {"name": "UI", "description": "Web interface"},
+        ]
     )
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     cors_origins = [
         origin.strip()
@@ -116,6 +161,9 @@ def create_app() -> FastAPI:
         ).split(",")
         if origin.strip()
     ]
+    
+    if os.environ.get("APP_ENV") == "production" and "*" in cors_origins:
+        raise RuntimeError("Wildcard CORS (*) is not allowed in production.")
 
     app.add_middleware(
         CORSMiddleware,
@@ -123,6 +171,35 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.trace_id = req_id
+        token = trace_id_ctx.set(req_id)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = req_id
+            return response
+        finally:
+            trace_id_ctx.reset(token)
+
+    @app.middleware("http")
+    async def metrics_security_middleware(request: Request, call_next):
+        if request.url.path == "/metrics":
+            client_ip = request.client.host if request.client else ""
+            metrics_token = os.environ.get("METRICS_TOKEN")
+            token_header = request.headers.get("X-Metrics-Token")
+            
+            if client_ip != "127.0.0.1" and (not metrics_token or token_header != metrics_token):
+                from fastapi import Response
+                return Response(status_code=403, content="Forbidden")
+        return await call_next(request)
+
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator().instrument(app).expose(app)
 
     # ── Register routers ────────────────────────────────────────────
     from aegisVault.app.routers.query  import router as query_router
@@ -139,12 +216,70 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["System"])
     def health(request: Request):
         from aegisVault.db.session import health_check
+        import time
+        import redis
+        
+        db_start = time.time()
+        db_ok = health_check()
+        db_lat = int((time.time() - db_start) * 1000)
+        
+        vs = getattr(request.app.state, "vectorstore", None)
+        try:
+            doc_count = vs._collection.count() if vs else 0
+            vs_ok = True
+        except Exception:
+            doc_count = 0
+            vs_ok = False
+            
+        neo4j_ok = getattr(request.app.state, "graph", None) is not None
+        
+        try:
+            r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+            redis_start = time.time()
+            r.ping()
+            redis_lat = int((time.time() - redis_start) * 1000)
+            redis_ok = True
+        except Exception:
+            redis_lat = 0
+            redis_ok = False
+            
+        all_ok = db_ok and vs_ok and redis_ok
         return {
-            "status":   "ok",
+            "status":   "ok" if all_ok else "degraded",
             "version":  "1.0.0",
-            "db":       "ok" if health_check() else "unreachable",
-            "neo4j":    "ok" if getattr(request.app.state, "graph", None) else "unavailable",
+            "checks": {
+                "db":         {"status": "ok" if db_ok else "unavailable", "latency_ms": db_lat},
+                "redis":      {"status": "ok" if redis_ok else "unavailable", "latency_ms": redis_lat},
+                "neo4j":      {"status": "ok" if neo4j_ok else "unavailable"},
+                "vectorstore":{"status": "ok" if vs_ok else "unavailable", "doc_count": doc_count},
+                "llm_client": {"status": "configured" if getattr(request.app.state, "llm_client", None) else "unavailable"}
+            }
         }
+
+    @app.get("/ready", tags=["System"])
+    def ready(request: Request):
+        from fastapi import Response
+        from aegisVault.db.session import health_check
+        import redis
+        
+        db_ok = health_check()
+        try:
+            r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+            r.ping()
+            redis_ok = True
+        except Exception:
+            redis_ok = False
+            
+        vs = getattr(request.app.state, "vectorstore", None)
+        vs_ok = vs is not None
+        if db_ok and redis_ok and vs_ok:
+            return Response(status_code=200, content="OK")
+        return Response(status_code=503, content="Service Unavailable")
+
+    @app.get("/live", tags=["System"])
+    def live():
+        from fastapi import Response
+        return Response(status_code=200, content="OK")
 
     return app
 

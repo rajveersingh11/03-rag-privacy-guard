@@ -53,13 +53,22 @@ class IngestionScrubber:
         self.analyzer  = AnalyzerEngine()
         self.anonymizer = AnonymizerEngine()
         
+        from aegisVault.constants import GDPR_RELEVANT_ENTITIES, HIPAA_RELEVANT_ENTITIES
+        mode = getattr(self.cfg, "compliance_mode", "none").lower()
+        if mode == "gdpr":
+            base_entities = GDPR_RELEVANT_ENTITIES
+        elif mode == "hipaa":
+            base_entities = HIPAA_RELEVANT_ENTITIES
+        else:
+            base_entities = cfg.entities_to_detect
+
         # Filter for supported entities to avoid "Recognizer not found" warnings
         supported_entities = self.analyzer.get_supported_entities()
         self.entities_to_detect = [
-            e for e in cfg.entities_to_detect if e in supported_entities
+            e for e in base_entities if e in supported_entities
         ]
         
-        logger.info(f"IngestionScrubber initialised with Presidio | Entities supported: {len(self.entities_to_detect)}")
+        logger.info(f"IngestionScrubber initialised with Presidio | Entities: {len(self.entities_to_detect)} | Mode: {mode}")
 
     # ── Public entry point ─────────────────────────────────────────────
 
@@ -186,10 +195,10 @@ class IngestionScrubber:
             return
 
         try:
-            cipher = Fernet(key.encode("utf-8"))
-        except ValueError:
-            fernet_key = base64.urlsafe_b64encode(key.encode("utf-8").ljust(32, b"0")[:32])
-            cipher = Fernet(fernet_key)
+            cipher = Fernet(key)
+        except ValueError as e:
+            logger.critical("QUARANTINE_ENCRYPTION_KEY is invalid.")
+            raise RuntimeError("Invalid QUARANTINE_ENCRYPTION_KEY") from e
 
         path = self.quarantine_dir / f"{doc_id}_{reason}.enc"
         path.write_bytes(cipher.encrypt(payload))

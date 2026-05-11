@@ -1,42 +1,115 @@
-services:
-  # ─── Redis (Task Broker for Celery) ───────────────────────
-  redis:
-    image: redis:alpine
-    container_name: aegis_redis
-    ports:
-      - "6379:6379"
-    restart: always
+version: "3.8"
 
-  # ─── MySQL (Audit Logging & Metadata) ─────────────────────
-  mysql:
-    image: mysql:8.0
-    container_name: aegis_mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: aegisdb
-      MYSQL_USER: aegis
-      MYSQL_PASSWORD: aegis_password
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      # Automatically run migrations on startup
-      - ./src/aegisVault/db/migrations:/docker-entrypoint-initdb.d
-    restart: always
-
-  # ─── Neo4j (Layer 3 GraphRAG Boundaries) ──────────
-  neo4j:
-    image: neo4j:5.12
-    container_name: aegis_neo4j
-    ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
-    environment:
-      - NEO4J_AUTH=neo4j/password
-    volumes:
-      - neo4j_data:/data
-    restart: always
+networks:
+  aegis_net:
 
 volumes:
   mysql_data:
   neo4j_data:
+  chroma_data:
+
+services:
+  aegisvault-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegisvault_api
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - aegis_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  aegisvault-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: aegisvault_worker
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - aegis_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    container_name: aegis_redis
+    networks:
+      - aegis_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: aegis_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: aegisdb
+      MYSQL_USER: ${MYSQL_USER:-aegis}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aegis_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init_sql:/docker-entrypoint-initdb.d
+    networks:
+      - aegis_net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.12
+    container_name: aegis_neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - aegis_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: aegis_chroma
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - aegis_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped

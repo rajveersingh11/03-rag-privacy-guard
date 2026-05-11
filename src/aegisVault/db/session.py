@@ -29,10 +29,13 @@ def _get_engine():
             "DATABASE_URL",
             "mysql+pymysql://aegis:aegis@localhost:3306/aegisdb"
         )
+        pool_size = int(os.environ.get("DATABASE_POOL_SIZE", "10"))
+        max_overflow = int(os.environ.get("DATABASE_MAX_OVERFLOW", "5"))
         _engine = create_engine(
             db_url,
-            pool_size=10,
-            max_overflow=5,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_recycle=3600,
             pool_pre_ping=True,   # auto-reconnect on stale connections
             echo=False,
         )

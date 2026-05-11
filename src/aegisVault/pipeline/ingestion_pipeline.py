@@ -68,6 +68,11 @@ class IngestionPipeline:
         Runs the full pipeline synchronously.
         In production this is called from the Celery task (worker.py).
         """
+        import os
+        max_bytes = int(os.environ.get("MAX_INGEST_BYTES", str(5 * 1024 * 1024)))
+        if len(text.encode("utf-8")) > max_bytes:
+            raise ValueError(f"Payload exceeds pipeline maximum of {max_bytes} bytes")
+
         acl_roles = [r.strip() for r in (acl_roles or ["employee"]) if r and r.strip()]
         if not acl_roles:
             acl_roles = ["employee"]

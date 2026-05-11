@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aegisvault-ingress
+  namespace: aegisvault
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "60"
+spec:
+  tls:
+    - hosts:
+        - api.aegisvault.internal
+      secretName: aegisvault-tls
+  rules:
+    - host: api.aegisvault.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aegisvault-api
+                port:
+                  number: 80

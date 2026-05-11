@@ -1,0 +1,117 @@
+name: AegisVault CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --dev
+      - name: Run Ruff
+        run: uv run ruff check src/ tests/
+      - name: Run Black
+        run: uv run black --check src/ tests/
+      - name: Run Mypy
+        run: uv run mypy src/aegisVault/ --ignore-missing-imports
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --dev
+      - name: Create docker-compose.test.yaml
+        run: |
+          echo 'version: "3.8"
+          services:
+            mysql:
+              image: mysql:8.0
+              environment:
+                MYSQL_ROOT_PASSWORD: test
+                MYSQL_DATABASE: aegisdb
+                MYSQL_USER: test
+                MYSQL_PASSWORD: test
+              ports:
+                - "3306:3306"
+            redis:
+              image: redis:alpine
+              ports:
+                - "6379:6379"' > docker-compose.test.yaml
+      - name: Start services
+        run: docker compose -f docker-compose.test.yaml up -d
+      - name: Run Pytest
+        env:
+          DATABASE_URL: "mysql+pymysql://test:test@127.0.0.1:3306/aegisdb"
+          REDIS_URL: "redis://127.0.0.1:6379/0"
+          QUARANTINE_ENCRYPTION_KEY: "unit-test-secret"
+          API_KEYS: "test-key-12345"
+        run: |
+          uv run pytest tests/ -v --cov=aegisVault --cov-report=xml --cov-fail-under=70
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: |
+          pip install uv pip-audit bandit trufflehog
+      - name: Pip Audit
+        run: |
+          uv export --format requirements-txt > req.txt
+          pip-audit -r req.txt --desc on
+      - name: Bandit Scan
+        run: bandit -r src/ -ll
+      - name: TruffleHog Secrets Scan
+        run: trufflehog filesystem .
+
+  build:
+    needs: [lint, test, security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t aegisvault:${{ github.sha }} .
+      - name: Build Worker image
+        run: docker build -f Dockerfile.worker -t aegisvault-worker:${{ github.sha }} .
+      - name: Push to Registry (simulated)
+        run: echo "Pushing to registry..."
+        # run: docker push myregistry.com/aegisvault:${{ github.sha }}
+
+  deploy:
+    needs: [build]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to K8s (simulated)
+        run: |
+          echo "kubectl set image deployment/aegisvault-api aegisvault-api=aegisvault:${{ github.sha }}"
+      - name: Post-deploy smoke test
+        run: |
+          echo "curl -f https://deploy-host.com/ready"
