@@ -12,8 +12,8 @@ Used by:
 
 from typing import List, Dict, Any
 
-from src.aegisVault.constants import SENSITIVITY_LEVELS, ROLE_CLEARANCE
-from src.aegisVault.utils.common import get_logger, sensitivity_index
+from aegisVault.constants import SENSITIVITY_LEVELS, ROLE_CLEARANCE
+from aegisVault.utils.common import get_logger, parse_metadata_list, sensitivity_index
 
 logger = get_logger(__name__)
 
@@ -141,9 +141,9 @@ class RBACPolicy:
             decision = self.can_access(
                 user_roles=user_roles,
                 chunk_sensitivity=meta.get("sensitivity_class", "PUBLIC"),
-                chunk_acl_roles=meta.get("acl_roles", []),
+                chunk_acl_roles=parse_metadata_list(meta.get("acl_roles", [])),
                 user_id=user_id,
-                chunk_acl_users=meta.get("acl_users", []),
+                chunk_acl_users=parse_metadata_list(meta.get("acl_users", [])),
             )
 
             if decision["allowed"]:

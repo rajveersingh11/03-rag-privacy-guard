@@ -4,11 +4,12 @@ AegisVault Utils
 Shared helper functions used across all modules.
 """
 
-from src.aegisVault.utils.common import (
+from aegisVault.utils.common import (
     get_logger,
     hash_text,
     ensure_dir,
     sensitivity_index,
+    parse_metadata_list,
     mask_secret,
     flatten_dict,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "hash_text",
     "ensure_dir",
     "sensitivity_index",
+    "parse_metadata_list",
     "mask_secret",
     "flatten_dict",
 ]

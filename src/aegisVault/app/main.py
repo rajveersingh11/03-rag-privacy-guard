@@ -37,13 +37,13 @@ async def lifespan(app: FastAPI):
     from langchain_community.vectorstores import Chroma
     from openai import OpenAI
 
-    from src.aegisVault.config.manager import get_config
-    from src.aegisVault.guards.privacy_math import DPEmbedder
-    from src.aegisVault.guards.graph_boundary import GraphBoundary
-    from src.aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
-    from src.aegisVault.pipeline.inference_pipeline import InferencePipeline
-    from src.aegisVault.access.rbac import RBACPolicy
-    from src.aegisVault.db.session import init_db
+    from aegisVault.config.manager import get_config
+    from aegisVault.guards.privacy_math import DPEmbedder
+    from aegisVault.guards.graph_boundary import GraphBoundary
+    from aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
+    from aegisVault.pipeline.inference_pipeline import InferencePipeline
+    from aegisVault.access.rbac import RBACPolicy
+    from aegisVault.db.session import init_db
 
     cfg = get_config()
     init_db()
@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
     app.state.graph            = graph
     app.state.rbac             = RBACPolicy(on_violation="drop")
     app.state.ingestion_pipeline = IngestionPipeline(cfg, vectorstore, graph)
-    app.state.inference_pipeline = InferencePipeline(cfg, vectorstore, llm_client)
+    app.state.inference_pipeline = InferencePipeline(cfg, vectorstore, llm_client, graph=graph)
 
     yield  # ── App runs ──────────────────────────────────────────────
 
@@ -108,16 +108,25 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    cors_origins = [
+        origin.strip()
+        for origin in os.environ.get(
+            "CORS_ALLOWED_ORIGINS",
+            "http://127.0.0.1:8000,http://localhost:8000",
+        ).split(",")
+        if origin.strip()
+    ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
 
     # ── Register routers ────────────────────────────────────────────
-    from src.aegisVault.app.routers.query  import router as query_router
-    from src.aegisVault.app.routers.ingest import router as ingest_router
+    from aegisVault.app.routers.query  import router as query_router
+    from aegisVault.app.routers.ingest import router as ingest_router
 
     app.include_router(query_router,  prefix="/query",  tags=["Query"])
     app.include_router(ingest_router, prefix="/ingest", tags=["Ingest"])
@@ -129,7 +138,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["System"])
     def health(request: Request):
-        from src.aegisVault.db.session import health_check
+        from aegisVault.db.session import health_check
         return {
             "status":   "ok",
             "version":  "1.0.0",

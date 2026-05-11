@@ -54,6 +54,12 @@ coverage.xml
 
 # Logs
 *.log
+logs/
+
+# Generated application data
+data/chroma_db/
+data/quarantine/
+data/audit_logs/
 
 # Temporary files
 *.tmp

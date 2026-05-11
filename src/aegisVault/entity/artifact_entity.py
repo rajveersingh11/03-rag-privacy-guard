@@ -8,7 +8,7 @@ typing across the ingestion and inference pipelines.
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 @dataclass
@@ -38,7 +38,7 @@ class IngestionArtifact:
     sensitivity_class:   str
     pii_entities_found:  List[str]
     text_modified:       bool
-    timestamp:           datetime = field(default_factory=datetime.utcnow)
+    timestamp:           datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -54,17 +54,16 @@ class RouteDecisionArtifact:
 @dataclass
 class RetrievalArtifact:
     chunks:           List[Dict[str, Any]]
-    blocked_count:    int
-    user_clearance:   str
+    trace_id:         str
 
 
 @dataclass
 class OutputSanitizationArtifact:
     original_response:      str
     safe_response:          str
-    was_modified:           bool
-    pii_entities_removed:   int
+    pii_redacted:           int
     canary_leaked:          bool
+    hallucination_detected: bool
     canary_tokens_found:    List[str]
     violations:             List[Dict[str, Any]]
 
@@ -80,4 +79,4 @@ class InferenceArtifact:
     canary_leaked:        bool
     hallucination_risk:   str          # low | medium | high
     latency_ms:           int
-    timestamp:            datetime = field(default_factory=datetime.utcnow)
+    timestamp:            datetime = field(default_factory=lambda: datetime.now(UTC))

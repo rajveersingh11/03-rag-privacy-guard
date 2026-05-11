@@ -14,7 +14,7 @@ Reference: PDF Section 1.2 — DPEmbedder reference implementation.
 
 import numpy as np
 from typing import List
-from src.aegisVault.utils.common import get_logger
+from aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 

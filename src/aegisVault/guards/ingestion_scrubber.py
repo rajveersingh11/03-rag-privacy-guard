@@ -8,7 +8,9 @@ Also runs a secret scanner for API keys, tokens, and credentials.
 Documents with critical PII or secrets are quarantined, not embedded.
 """
 
-import hashlib
+import base64
+import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,11 +19,12 @@ from typing import List, Dict, Any, Optional
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
+from cryptography.fernet import Fernet
 
-from src.aegisVault.entity.artifact_entity import PIIScanArtifact
-from src.aegisVault.entity.config_entity import PIIConfig
-from src.aegisVault.constants import PII_SEVERITY
-from src.aegisVault.utils.common import get_logger, ensure_dir, hash_text
+from aegisVault.entity.artifact_entity import PIIScanArtifact
+from aegisVault.entity.config_entity import PIIConfig
+from aegisVault.constants import PII_SEVERITY
+from aegisVault.utils.common import get_logger, ensure_dir, hash_text
 
 logger = get_logger(__name__)
 
@@ -158,10 +161,43 @@ class IngestionScrubber:
     # ── Quarantine ─────────────────────────────────────────────────────
 
     def _quarantine(self, text: str, doc_id: str, reason: str):
-        path = self.quarantine_dir / f"{doc_id}_{reason}.txt"
-        with open(path, "w") as f:
-            f.write(f"REASON: {reason}\nDOC_ID: {doc_id}\n---\n{text}")
-        logger.info(f"Quarantined → {path}")
+        payload = json.dumps(
+            {"reason": reason, "doc_id": doc_id, "text": text},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        key = os.environ.get("QUARANTINE_ENCRYPTION_KEY")
+        if not key:
+            logger.error(
+                "QUARANTINE_ENCRYPTION_KEY is not set; raw quarantined content was not persisted"
+            )
+            path = self.quarantine_dir / f"{doc_id}_{reason}.meta.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "reason": reason,
+                        "doc_id": doc_id,
+                        "encrypted": False,
+                        "raw_content_persisted": False,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            return
+
+        try:
+            cipher = Fernet(key.encode("utf-8"))
+        except ValueError:
+            fernet_key = base64.urlsafe_b64encode(key.encode("utf-8").ljust(32, b"0")[:32])
+            cipher = Fernet(fernet_key)
+
+        path = self.quarantine_dir / f"{doc_id}_{reason}.enc"
+        path.write_bytes(cipher.encrypt(payload))
+        try:
+            path.chmod(0o600)
+        except OSError:
+            logger.debug(f"Could not tighten quarantine file permissions: {path}")
+        logger.info(f"Encrypted quarantine saved to {path}")
 
     # ── Sensitivity classification ─────────────────────────────────────
 

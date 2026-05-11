@@ -68,7 +68,9 @@ class IngestionPipeline:
         Runs the full pipeline synchronously.
         In production this is called from the Celery task (worker.py).
         """
-        acl_roles = acl_roles or ["employee"]
+        acl_roles = [r.strip() for r in (acl_roles or ["employee"]) if r and r.strip()]
+        if not acl_roles:
+            acl_roles = ["employee"]
         doc_id = metadata.get("doc_id", hash_text(text))
 
         logger.info(f"[{doc_id}] Ingestion started | tenant={tenant_id}")
@@ -259,8 +261,11 @@ if __name__ == "__main__":
             AegisVaultConfig, DifferentialPrivacyConfig, PIIConfig,
             SemanticRouterConfig, RetrievalConfig, GraphConfig,
             LLMConfig, OutputSanitizerConfig, AuditConfig, CeleryConfig,
+            AppConfig, PathsConfig,
         )
         cfg = AegisVaultConfig(
+            app=AppConfig("AegisVault", "1.0.0", "127.0.0.1", 8000, False),
+            paths=PathsConfig("./data", "./data/chroma_db", "./data/quarantine", "./data/audit_logs"),
             dp=DifferentialPrivacyConfig(epsilon=args.epsilon, sensitivity=1.0, enabled=True),
             pii=PIIConfig(
                 confidence_threshold=0.7,

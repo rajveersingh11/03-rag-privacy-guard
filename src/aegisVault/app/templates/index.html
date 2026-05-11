@@ -1066,6 +1066,17 @@
         let currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 11).toUpperCase();
         document.getElementById('session-id').innerText = currentSessionId;
 
+        function getApiKey() {
+            let key = window.localStorage.getItem('aegis_api_key');
+            if (!key) {
+                key = window.prompt('Enter AegisVault API key');
+                if (key) {
+                    window.localStorage.setItem('aegis_api_key', key);
+                }
+            }
+            return key || '';
+        }
+
         function switchTab(event, tab) {
             document.querySelectorAll('.nav-item').forEach((el) => el.classList.remove('active'));
             if (event?.currentTarget) {
@@ -1097,7 +1108,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-API-Key': 'dev-key'
+                        'X-API-Key': getApiKey()
                     },
                     body: JSON.stringify({
                         query,
@@ -1214,7 +1225,7 @@
             try {
                 const response = await fetch('/ingest/file?async=false', {
                     method: 'POST',
-                    headers: { 'X-API-Key': 'dev-key' },
+                    headers: { 'X-API-Key': getApiKey() },
                     body: formData
                 });
 

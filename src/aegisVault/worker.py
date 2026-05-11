@@ -5,10 +5,10 @@ Handles async ingestion tasks so the FastAPI event loop
 never blocks on heavy NER / DP embedding operations.
 
 Start worker:
-    celery -A src.aegisVault.worker worker --loglevel=info --concurrency=4
+    celery -A aegisVault.worker worker --loglevel=info --concurrency=4
 
 Send task from app:
-    from src.aegisVault.worker import ingest_document_task
+    from aegisVault.worker import ingest_document_task
     ingest_document_task.delay(text, metadata, tenant_id, acl_roles)
 """
 
@@ -45,9 +45,9 @@ def ingest_document_task(self, text: str, metadata: dict,
     try:
         from langchain_huggingface import HuggingFaceEmbeddings
         from langchain_community.vectorstores import Chroma
-        from src.aegisVault.config.manager import get_config
-        from src.aegisVault.guards.privacy_math import DPEmbedder
-        from src.aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
+        from aegisVault.config.manager import get_config
+        from aegisVault.guards.privacy_math import DPEmbedder
+        from aegisVault.pipeline.ingestion_pipeline import IngestionPipeline
 
         cfg = get_config()
 

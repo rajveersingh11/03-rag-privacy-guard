@@ -15,10 +15,10 @@ For development: uses a distilbert zero-shot classifier as fallback.
 import re
 from typing import List, Optional, Dict
 
-from src.aegisVault.entity.artifact_entity import RouteDecisionArtifact
-from src.aegisVault.entity.config_entity import SemanticRouterConfig
-from src.aegisVault.constants import INJECTION_CATEGORIES
-from src.aegisVault.utils.common import get_logger
+from aegisVault.entity.artifact_entity import RouteDecisionArtifact
+from aegisVault.entity.config_entity import SemanticRouterConfig
+from aegisVault.constants import INJECTION_CATEGORIES
+from aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 
@@ -127,8 +127,16 @@ class SemanticRouter:
             )
 
         except Exception as e:
+            if self.cfg.fail_closed:
+                logger.error(f"SemanticRouter classifier error: {e} - failing closed")
+                return RouteDecisionArtifact(
+                    query=query, is_safe=False,
+                    action="block", category="security_classifier_unavailable",
+                    confidence=0.0, safe_query=None,
+                )
+
             # Fail-open with warning — don't block users on classifier errors
-            logger.error(f"SemanticRouter classifier error: {e} — failing open")
+            logger.error(f"SemanticRouter classifier error: {e} - failing open")
             return RouteDecisionArtifact(
                 query=query, is_safe=True,
                 action="allow", category=None,

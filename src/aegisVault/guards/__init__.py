@@ -10,11 +10,11 @@ Layer 3 — graph_boundary      : Neo4j multi-tenant GraphRAG isolation
 Layer 5 — output_sanitizer    : Canary token check + output PII scrub
 """
 
-from src.aegisVault.guards.ingestion_scrubber import IngestionScrubber
-from src.aegisVault.guards.privacy_math       import DPEmbedder
-from src.aegisVault.guards.semantic_router    import SemanticRouter
-from src.aegisVault.guards.graph_boundary     import GraphBoundary
-from src.aegisVault.guards.output_sanitizer   import OutputSanitizer
+from aegisVault.guards.ingestion_scrubber import IngestionScrubber
+from aegisVault.guards.privacy_math       import DPEmbedder
+from aegisVault.guards.semantic_router    import SemanticRouter
+from aegisVault.guards.graph_boundary     import GraphBoundary
+from aegisVault.guards.output_sanitizer   import OutputSanitizer
 
 __all__ = [
     "IngestionScrubber",

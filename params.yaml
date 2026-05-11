@@ -35,9 +35,10 @@ pii:
 # ─────────────── Semantic Router (Layer 2) ────────────────
 semantic_router:
   model_id: "meta-llama/LlamaGuard-7b"   # or fine-tuned local classifier
-  fallback_model: "distilbert-base-uncased-finetuned-sst-2-english"
+  fallback_model: "facebook/bart-large-mnli"
   device: "cpu"                           # cpu | cuda
   confidence_threshold: 0.85
+  fail_closed: true                        # block when classifier is unavailable
   block_categories:
     - "prompt_injection"
     - "jailbreak"

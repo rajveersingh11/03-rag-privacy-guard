@@ -8,6 +8,7 @@ Auth: X-API-Key header (set API_KEY in .env)
 """
 
 import os
+import secrets
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
@@ -43,8 +44,10 @@ class QueryResponse(BaseModel):
 # ── Auth dependency ────────────────────────────────────────────────────
 
 def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
-    expected = os.environ.get("API_KEY", "dev-key")
-    if x_api_key != expected:
+    expected = os.environ.get("API_KEY")
+    if not expected:
+        raise HTTPException(status_code=503, detail="API key is not configured")
+    if not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return x_api_key
 

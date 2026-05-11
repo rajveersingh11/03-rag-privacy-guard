@@ -16,7 +16,7 @@ from ..guards.output_sanitizer import OutputSanitizer
 from ..entity.artifact_entity import InferenceArtifact
 from ..entity.config_entity import AegisVaultConfig
 from ..constants import ROLE_CLEARANCE, SENSITIVITY_LEVELS
-from ..utils.common import get_logger, sensitivity_index
+from ..utils.common import get_logger, parse_metadata_list, sensitivity_index
 
 logger = get_logger(__name__)
 
@@ -37,11 +37,13 @@ class InferencePipeline:
         config:       AegisVaultConfig,
         vectorstore,                       # Chroma vectorstore
         llm_client,                        # OpenAI or Gemini client
+        graph         = None,              # Optional GraphBoundary
         db_session    = None,              # SQLAlchemy session
     ):
         self.cfg        = config
         self.vectorstore = vectorstore
         self.llm        = llm_client
+        self.graph      = graph
         self.db         = db_session
         self.router     = SemanticRouter(config.semantic_router)
         self.sanitizer  = OutputSanitizer(config.output_sanitizer, config.pii)
@@ -79,23 +81,54 @@ class InferencePipeline:
         safe_query = route.safe_query or standalone_query
 
         # ── Layer 3: RBAC-filtered retrieval ──────────────────────────
-        raw_results = self.vectorstore.similarity_search_with_relevance_scores(
-            safe_query, k=top_k * 2  # fetch extra, filter down
-        )
-# ... (rest of method continues, remember to append to history at the end)
-
         user_clearance = ROLE_CLEARANCE.get(
             max(user_roles, key=lambda r: sensitivity_index(ROLE_CLEARANCE.get(r, "PUBLIC"))),
             "INTERNAL",
         )
         user_level = sensitivity_index(user_clearance)
 
+        authorized_doc_ids = None
+        if self.graph and self.cfg.graph.tenant_isolation:
+            try:
+                authorized_doc_ids = set(self.graph.get_authorized_doc_ids(
+                    user_roles=user_roles,
+                    tenant_id=tenant_id,
+                    max_clearance=user_clearance,
+                ))
+            except Exception as e:
+                logger.error(f"[{trace_id}] Graph authorization failed: {e}")
+                return self._blocked_response(
+                    trace_id, user_query, "authorization_boundary_unavailable",
+                    int((time.time()-start_ms)*1000),
+                )
+
+            if not authorized_doc_ids:
+                return self._no_context_response(
+                    trace_id, user_query, int((time.time()-start_ms)*1000)
+                )
+
+        raw_results = self._retrieve_candidates(
+            safe_query=safe_query,
+            fetch_k=top_k * 4,
+            authorized_doc_ids=authorized_doc_ids,
+        )
+
         authorized_chunks = []
         blocked_count = 0
+        min_score = self.cfg.retrieval.similarity_threshold
         for doc, score in raw_results:
+            if score is not None and float(score) < min_score:
+                blocked_count += 1
+                continue
+
             chunk_class = doc.metadata.get("sensitivity_class", "PUBLIC")
-            chunk_roles = doc.metadata.get("acl_roles", [])
+            chunk_roles = parse_metadata_list(doc.metadata.get("acl_roles", []))
             chunk_tenant = doc.metadata.get("tenant_id", "default")
+            chunk_doc_id = doc.metadata.get("doc_id")
+
+            if authorized_doc_ids is not None and chunk_doc_id not in authorized_doc_ids:
+                blocked_count += 1
+                continue
 
             # Tenant isolation
             if chunk_tenant != tenant_id:
@@ -161,9 +194,10 @@ class InferencePipeline:
             )
 
         # ── Layer 6: Audit log ─────────────────────────────────────────
-        self._audit(trace_id, user_id, safe_query, sanitized.safe_response,
+        self._audit(trace_id, user_id, tenant_id, safe_query, sanitized.safe_response,
                     len(authorized_chunks), blocked_count,
-                    sanitized.pii_entities_removed, sanitized.violations, latency_ms)
+                    sanitized.pii_redacted, sanitized.canary_leaked,
+                    sanitized.violations, latency_ms, route.action, route.category)
 
         # ── SINGLE-USE LOGIC: Update Conversation History ─────────────
         if session_id not in self.history:
@@ -182,13 +216,36 @@ class InferencePipeline:
             safe_response=sanitized.safe_response,
             chunks_used=len(authorized_chunks),
             rbac_blocked=blocked_count,
-            pii_redacted=sanitized.pii_entities_removed,
+            pii_redacted=sanitized.pii_redacted,
             canary_leaked=sanitized.canary_leaked,
             hallucination_risk="low",  # extend with hallucination detector
             latency_ms=latency_ms,
         )
 
     # ── Helpers ────────────────────────────────────────────────────────
+
+    def _retrieve_candidates(self, safe_query: str, fetch_k: int,
+                             authorized_doc_ids: Optional[set] = None):
+        """Retrieve vector candidates, applying graph doc IDs as a pre-filter when Chroma supports it."""
+        if not authorized_doc_ids:
+            return self.vectorstore.similarity_search_with_relevance_scores(
+                safe_query, k=fetch_k
+            )
+
+        graph_filter = {"doc_id": {"$in": list(authorized_doc_ids)}}
+        try:
+            return self.vectorstore.similarity_search_with_relevance_scores(
+                safe_query, k=fetch_k, filter=graph_filter
+            )
+        except TypeError:
+            raw = self.vectorstore.similarity_search_with_relevance_scores(
+                safe_query, k=fetch_k
+            )
+            return [
+                (doc, score)
+                for doc, score in raw
+                if doc.metadata.get("doc_id") in authorized_doc_ids
+            ]
 
     def _get_standalone_query(self, query: str, session_id: str) -> str:
         """
@@ -245,26 +302,47 @@ class InferencePipeline:
             canary_leaked=False, hallucination_risk="none", latency_ms=latency_ms,
         )
 
-    def _audit(self, trace_id, user_id, query, response,
-               chunks_used, blocked, pii_redacted, violations, latency_ms):
-        if not self.db:
-            return
+    def _audit(self, trace_id, user_id, tenant_id, query, response,
+               chunks_used, blocked, pii_redacted, canary_leaked,
+               violations, latency_ms, route_action, route_category):
         try:
             import json
-            from datetime import datetime
+            from datetime import datetime, UTC
             from sqlalchemy import text
-            self.db.execute(text("""
+            from aegisVault.db.session import db_session
+
+            audit_query = query
+            audit_response = response
+            if self.cfg.audit.scrub_before_log:
+                audit_query = self.sanitizer.sanitize(query, trace_id).safe_response
+                audit_response = self.sanitizer.sanitize(response, trace_id).safe_response
+
+            stmt = text("""
                 INSERT INTO audit_log
                   (id, trace_id, user_id, query, response, chunks_used,
-                   rbac_blocked, pii_redacted, violations, latency_ms, timestamp)
+                   rbac_blocked, pii_redacted, violations, latency_ms, timestamp,
+                   tenant_id, canary_leaked, model, route_action, route_category)
                 VALUES
-                  (:id, :tid, :uid, :q, :r, :cu, :rb, :pr, :v, :lm, :ts)
-            """), {
-                "id": trace_id, "tid": trace_id, "uid": user_id, "q": query, "r": response,
+                  (:id, :tid, :uid, :q, :r, :cu, :rb, :pr, :v, :lm, :ts,
+                   :tenant_id, :canary, :model, :route_action, :route_category)
+            """)
+            params = {
+                "id": trace_id, "tid": trace_id, "uid": user_id,
+                "q": audit_query, "r": audit_response,
                 "cu": chunks_used, "rb": blocked, "pr": pii_redacted,
-                "v": json.dumps(violations), "lm": latency_ms, "ts": datetime.utcnow(),
-            })
-            self.db.commit()
+                "v": json.dumps(violations), "lm": latency_ms, "ts": datetime.now(UTC),
+                "tenant_id": tenant_id, "canary": canary_leaked,
+                "model": self.cfg.llm.model_id,
+                "route_action": route_action,
+                "route_category": route_category,
+            }
+
+            if self.db:
+                self.db.execute(stmt, params)
+                self.db.commit()
+            else:
+                with db_session() as session:
+                    session.execute(stmt, params)
         except Exception as e:
             logger.error(f"Audit log failed: {e}")
 
@@ -353,8 +431,11 @@ if __name__ == "__main__":
             AegisVaultConfig, DifferentialPrivacyConfig, PIIConfig,
             SemanticRouterConfig, RetrievalConfig, GraphConfig,
             LLMConfig, OutputSanitizerConfig, AuditConfig, CeleryConfig,
+            AppConfig, PathsConfig,
         )
         cfg = AegisVaultConfig(
+            app=AppConfig("AegisVault", "1.0.0", "127.0.0.1", 8000, False),
+            paths=PathsConfig("./data", "./data/chroma_db", "./data/quarantine", "./data/audit_logs"),
             dp=DifferentialPrivacyConfig(epsilon=1.0, sensitivity=1.0, enabled=True),
             pii=PIIConfig(
                 confidence_threshold=0.7,

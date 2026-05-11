@@ -10,8 +10,8 @@ from access control (RBACPolicy.filter_chunks) cleanly.
 
 from typing import List, Dict, Any, Tuple, Optional
 
-from src.aegisVault.access.rbac import RBACPolicy
-from src.aegisVault.utils.common import get_logger
+from aegisVault.access.rbac import RBACPolicy
+from aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 

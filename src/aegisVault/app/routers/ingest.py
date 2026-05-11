@@ -10,12 +10,29 @@ Auth: X-API-Key header
 """
 
 import os
+import secrets
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, Query, Request
 from pydantic import BaseModel
 
 router = APIRouter()
+
+MAX_INGEST_BYTES = int(os.environ.get("MAX_INGEST_BYTES", str(5 * 1024 * 1024)))
+ALLOWED_EXTENSIONS = {
+    ext.strip().lower()
+    for ext in os.environ.get("ALLOWED_INGEST_EXTENSIONS", ".txt,.md,.csv").split(",")
+    if ext.strip()
+}
+ALLOWED_CONTENT_TYPES = {
+    ct.strip().lower()
+    for ct in os.environ.get(
+        "ALLOWED_INGEST_CONTENT_TYPES",
+        "text/plain,text/markdown,text/csv,application/octet-stream",
+    ).split(",")
+    if ct.strip()
+}
 
 
 # ── Response schema ────────────────────────────────────────────────────
@@ -34,9 +51,36 @@ class IngestResponse(BaseModel):
 # ── Auth ───────────────────────────────────────────────────────────────
 
 def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
-    if x_api_key != os.environ.get("API_KEY", "dev-key"):
+    expected = os.environ.get("API_KEY")
+    if not expected:
+        raise HTTPException(status_code=503, detail="API key is not configured")
+    if not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return x_api_key
+
+
+async def _read_limited_text_file(file: UploadFile) -> str:
+    suffix = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "application/octet-stream").lower()
+
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file extension. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+
+    content_bytes = await file.read(MAX_INGEST_BYTES + 1)
+    if len(content_bytes) > MAX_INGEST_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size is {MAX_INGEST_BYTES} bytes.",
+        )
+    if not content_bytes.strip():
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    return content_bytes.decode("utf-8", errors="replace")
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -58,18 +102,18 @@ async def ingest_file(
     Async (default): queues a Celery task → returns immediately with task_id.
     Sync (?async=false): runs pipeline inline → returns full result.
     """
-    content = (await file.read()).decode("utf-8", errors="replace")
+    content = await _read_limited_text_file(file)
     metadata = {
         "source":   file.filename,
         "filename": file.filename,
         "content_type": file.content_type or "text/plain",
     }
-    roles = [r.strip() for r in acl_roles.split(",")]
+    roles = [r.strip() for r in acl_roles.split(",") if r.strip()] or ["employee"]
 
     if run_async:
         # Queue via Celery worker
         try:
-            from src.aegisVault.worker import ingest_document_task
+            from aegisVault.worker import ingest_document_task
             task = ingest_document_task.delay(content, metadata, tenant_id, roles)
             return IngestResponse(
                 doc_id=metadata.get("source", "unknown"),
@@ -125,7 +169,7 @@ async def ingest_text(
         text=text,
         metadata={"source": source},
         tenant_id=tenant_id,
-        acl_roles=[r.strip() for r in acl_roles.split(",")],
+        acl_roles=[r.strip() for r in acl_roles.split(",") if r.strip()] or ["employee"],
     )
 
     return IngestResponse(

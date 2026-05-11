@@ -33,6 +33,7 @@ class SemanticRouterConfig:
     device: str
     confidence_threshold: float
     block_categories: List[str]
+    fail_closed: bool = True
 
 
 @dataclass

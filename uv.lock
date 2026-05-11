@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "03-rag-privacy-guard"
+name = "aegis-vault-rag-privacy-guard"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -23,9 +23,11 @@ dependencies = [
     { name = "langchain-google-genai" },
     { name = "langchain-huggingface" },
     { name = "langchain-openai" },
+    { name = "langchain-text-splitters" },
     { name = "matplotlib" },
     { name = "neo4j" },
     { name = "numpy" },
+    { name = "openai" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
     { name = "pydantic" },
@@ -57,9 +59,11 @@ requires-dist = [
     { name = "langchain-google-genai", specifier = ">=4.2.2" },
     { name = "langchain-huggingface", specifier = ">=1.2.2" },
     { name = "langchain-openai", specifier = ">=1.2.1" },
+    { name = "langchain-text-splitters", specifier = ">=1.0.0" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "neo4j", specifier = ">=6.2.0" },
     { name = "numpy", specifier = ">=2.4.4" },
+    { name = "openai", specifier = ">=2.0.0" },
     { name = "presidio-analyzer", specifier = ">=2.2.362" },
     { name = "presidio-anonymizer", specifier = ">=2.2.362" },
     { name = "pydantic", specifier = ">=2.13.4" },

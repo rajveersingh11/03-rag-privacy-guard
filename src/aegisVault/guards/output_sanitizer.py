@@ -14,9 +14,9 @@ from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-from src.aegisVault.entity.artifact_entity import OutputSanitizationArtifact
-from src.aegisVault.entity.config_entity import OutputSanitizerConfig, PIIConfig
-from src.aegisVault.utils.common import get_logger
+from aegisVault.entity.artifact_entity import OutputSanitizationArtifact
+from aegisVault.entity.config_entity import OutputSanitizerConfig, PIIConfig
+from aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
 
@@ -85,9 +85,9 @@ class OutputSanitizer:
         return OutputSanitizationArtifact(
             original_response=response,
             safe_response=safe_text,
-            was_modified=safe_text != response,
-            pii_entities_removed=pii_count,
+            pii_redacted=pii_count,
             canary_leaked=len(canary_hits) > 0,
+            hallucination_detected=False,  # default for now
             canary_tokens_found=canary_hits,
             violations=violations,
         )

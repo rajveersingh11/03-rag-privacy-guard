@@ -1,6 +1,7 @@
 """Shared utilities used across AegisVault."""
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -54,7 +55,7 @@ def _setup_initial_logging():
     # 2. File Handler (Attempt to use config path, fallback to ./logs)
     try:
         # Avoid circular import by importing inside function
-        from src.aegisVault.config.manager import get_config
+        from aegisVault.config.manager import get_config
         cfg = get_config()
         log_dir = Path(cfg.paths.audit_log_dir)
     except Exception:
@@ -83,8 +84,28 @@ def ensure_dir(path: str | Path) -> Path:
 
 
 def sensitivity_index(level: str) -> int:
-    from src.aegisVault.constants import SENSITIVITY_LEVELS
+    from aegisVault.constants import SENSITIVITY_LEVELS
     return SENSITIVITY_LEVELS.index(level) if level in SENSITIVITY_LEVELS else 0
+
+
+def parse_metadata_list(value: Any) -> List[str]:
+    """Normalize list-like Chroma metadata stored as JSON text or scalars."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple) or isinstance(value, set):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        return parse_metadata_list(parsed)
+    return [str(value).strip()]
 
 
 def mask_secret(value: str, show_chars: int = 4) -> str:
