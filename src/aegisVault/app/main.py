@@ -36,7 +36,7 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 async def lifespan(app: FastAPI):
     """Initialise all services on startup, clean up on shutdown."""
     from langchain_huggingface import HuggingFaceEmbeddings
-    from langchain_community.vectorstores import Chroma
+    from langchain_chroma import Chroma
     from openai import OpenAI
 
     from aegisVault.config.manager import get_config
@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
         origin.strip()
         for origin in os.environ.get(
             "CORS_ALLOWED_ORIGINS",
-            "http://127.0.0.1:8000,http://localhost:8000",
+            "http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173,http://127.0.0.1:5173",
         ).split(",")
         if origin.strip()
     ]
@@ -172,7 +172,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+    is_prod = os.environ.get("APP_ENV") == "production"
+    dist_dir = os.path.abspath(os.path.join(BASE_DIR, "../../../frontend/dist"))
+    
+    if is_prod and os.path.exists(dist_dir):
+        assets_dir = os.path.join(dist_dir, "assets")
+        if os.path.exists(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    else:
+        app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
@@ -211,6 +219,13 @@ def create_app() -> FastAPI:
     # ── UI Serving ──────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse, tags=["UI"])
     async def index(request: Request):
+        is_prod = os.environ.get("APP_ENV") == "production"
+        dist_dir = os.path.abspath(os.path.join(BASE_DIR, "../../../frontend/dist"))
+        if is_prod:
+            from fastapi.responses import FileResponse
+            index_path = os.path.join(dist_dir, "index.html")
+            if os.path.exists(index_path):
+                return FileResponse(index_path)
         return templates.TemplateResponse(request=request, name="index.html")
 
     @app.get("/health", tags=["System"])

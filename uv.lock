@@ -22,6 +22,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "langchain" },
+    { name = "langchain-chroma" },
     { name = "langchain-community" },
     { name = "langchain-google-genai" },
     { name = "langchain-huggingface" },
@@ -68,6 +69,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", specifier = ">=1.2.18" },
+    { name = "langchain-chroma", specifier = ">=1.1.0" },
     { name = "langchain-community", specifier = ">=0.4.1" },
     { name = "langchain-google-genai", specifier = ">=4.2.2" },
     { name = "langchain-huggingface", specifier = ">=1.2.2" },
@@ -1775,6 +1777,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1d/4e/b651ecac63af474b28519384f7011294493d139937b1a9591581291eef34/langchain-1.2.18.tar.gz", hash = "sha256:7e829dbf117affadfd2067a0e97b4af20222f535f30fb812a28472d842c1074c", size = 582882, upload-time = "2026-05-08T13:59:19.895Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/59/20/959f6098c79158afe5aedce7de05c3700f10d293890ef9e5dace6c3ad94b/langchain-1.2.18-py3-none-any.whl", hash = "sha256:8432d43a65540845ed6f1a783d38d869c4659a6b9405f9a510169ad40d2f7bae", size = 113643, upload-time = "2026-05-08T13:59:18.461Z" },
+]
+
+[[package]]
+name = "langchain-chroma"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "chromadb" },
+    { name = "langchain-core" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/0e/54896830b7331c90788cf96b2c37858977c199da9ecdaf85cf11eb6e6bc1/langchain_chroma-1.1.0.tar.gz", hash = "sha256:8069685e7848041e998d16c8a4964256b031fd20551bf59429173415bc2adc12", size = 220382, upload-time = "2025-12-12T16:23:01.399Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/35/2a6d1191acaad043647e28313b0ecd161d61f09d8be37d1996a90d752c13/langchain_chroma-1.1.0-py3-none-any.whl", hash = "sha256:ff65e4a2ccefb0fb9fde2ff38705022ace402f979d557f018f6e623f7288f0fc", size = 12981, upload-time = "2025-12-12T16:23:00.196Z" },
 ]
 
 [[package]]

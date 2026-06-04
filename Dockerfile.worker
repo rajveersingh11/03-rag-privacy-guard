@@ -4,12 +4,16 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock ./
-RUN pip install uv && uv sync --no-dev --frozen
+# Install dependencies only (avoids failure since src/ is not yet copied)
+RUN pip install uv && uv sync --no-dev --frozen --no-install-project
 COPY src/ ./src/
+# Install the project itself
+RUN uv sync --no-dev --frozen
 COPY config/ ./config/
 COPY params.yaml ./
 ENV PYTHONPATH=/app/src
 ENV APP_ENV=production
+ENV PATH="/app/.venv/bin:$PATH"
 # Pre-download Presidio NER models (avoids runtime download)
 RUN python -c "from presidio_analyzer import AnalyzerEngine; AnalyzerEngine()"
 # Pre-download HuggingFace embedding model specified in params.yaml

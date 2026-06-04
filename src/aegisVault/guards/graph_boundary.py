@@ -54,6 +54,7 @@ class GraphBoundary:
     # ── Schema setup (run once on startup) ────────────────────────────
 
     def ensure_schema(self):
+        logger.info("Ensuring Neo4j schema constraints...")
         driver = self._get_driver()
         with driver.session() as session:
             session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (t:Tenant) REQUIRE t.id IS UNIQUE")
