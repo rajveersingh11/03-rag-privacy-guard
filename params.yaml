@@ -7,8 +7,11 @@
 differential_privacy:
   epsilon: 1.0          # Privacy budget. Lower = more private, less accurate.
                         # Recommended: 0.5 (high-security) to 2.0 (balanced)
-  sensitivity: 1.0      # L2 sensitivity of the embedding function
+  sensitivity: 1.0      # L2 sensitivity of the embedding function (ignored when using gaussian mechanism / clipping)
   enabled: true
+  delta: 0.00001        # Bounding parameter for Gaussian mechanism
+  mechanism: "gaussian" # laplace | gaussian
+  clipping_threshold: 1.0 # Bounding L2 norm for embeddings before adding noise
 
 # ─────────────── PII Scrubbing (Layer 1) ──────────────────
 pii:
@@ -75,7 +78,7 @@ llm:
 # ─────────────── Output Sanitizer (Layer 5) ───────────────
 output_sanitizer:
   canary_tokens:
-    - "AEGIS-CANARY-ALPHA-7749"
+    - "AEGIS-INTERNAL-MARKETING-PII-7749A8"
     - "TEST-SSN-999-99-9999"
     - "FAKE-CC-4111111111111111"
   alert_on_canary: true

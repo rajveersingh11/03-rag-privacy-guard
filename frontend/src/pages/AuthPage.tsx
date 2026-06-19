@@ -23,11 +23,11 @@ export const AuthPage: React.FC = () => {
     try {
       if (isLogin) {
         const res = await apiClient.login(username, password);
-        loginUser(res.username, res.api_key, res.role);
+        loginUser(res.username, res.role);
       } else {
         const res = await apiClient.signup(username, password);
         showToast('Admin account provisioned successfully!', 'success');
-        loginUser(res.username, res.api_key, res.role);
+        loginUser(res.username, res.role);
       }
     } catch (err: any) {
       console.error(err);

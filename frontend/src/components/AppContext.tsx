@@ -19,7 +19,7 @@ interface AppContextType {
 
   // Auth state
   user: { username: string; role: string } | null;
-  loginUser: (username: string, apiKey: string, role: string) => void;
+  loginUser: (username: string, role: string) => void;
   logoutUser: () => void;
   
   // Toasts
@@ -56,19 +56,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : null;
   });
 
-  const loginUser = (username: string, key: string, role: string) => {
-    localStorage.setItem('ae_api_key', key);
+  const loginUser = (username: string, role: string) => {
     const userObj = { username, role };
     localStorage.setItem('ae_user', JSON.stringify(userObj));
-    setApiKey(key);
     setUser(userObj);
     showToast(`Welcome back, ${username}!`, 'success');
   };
 
   const logoutUser = () => {
-    localStorage.removeItem('ae_api_key');
+    apiClient.logout().catch((err) => {
+      console.error('Session logout failed on backend:', err);
+    });
     localStorage.removeItem('ae_user');
-    setApiKey('');
     setUser(null);
     showToast('Logged out successfully', 'info');
   };

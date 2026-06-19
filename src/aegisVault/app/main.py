@@ -53,7 +53,14 @@ async def lifespan(app: FastAPI):
     # ── DP-wrapped embedder ─────────────────────────────────────────
     base_emb = HuggingFaceEmbeddings(model_name=cfg.retrieval.embedding_model)
     embedder = (
-        DPEmbedder(base_emb, cfg.dp.epsilon, cfg.dp.sensitivity)
+        DPEmbedder(
+            base_embedder=base_emb,
+            epsilon=cfg.dp.epsilon,
+            sensitivity=cfg.dp.sensitivity,
+            delta=cfg.dp.delta,
+            mechanism=cfg.dp.mechanism,
+            clipping_threshold=cfg.dp.clipping_threshold,
+        )
         if cfg.dp.enabled else base_emb
     )
 
@@ -91,7 +98,7 @@ async def lifespan(app: FastAPI):
     from aegisVault.utils.common import get_logger
     
     if not cfg.output_sanitizer.canary_tokens or "change-me" in cfg.output_sanitizer.canary_tokens[0].lower():
-        canary = f"AEGIS-CANARY-{secrets.token_hex(8).upper()}"
+        canary = f"AEGIS-INTERNAL-MARKETING-PII-{secrets.token_hex(6).upper()}"
         cfg.output_sanitizer.canary_tokens = [canary]
         try:
             vectorstore.add_texts(
@@ -167,12 +174,44 @@ def create_app() -> FastAPI:
     if os.environ.get("APP_ENV") == "production" and "*" in cors_origins:
         raise RuntimeError("Wildcard CORS (*) is not allowed in production.")
 
+    from fastapi.middleware.trustedhost import TrustedHostMiddleware
+    allowed_hosts = [
+        host.split("://")[-1].split(":")[0]
+        for host in cors_origins
+    ] + ["localhost", "127.0.0.1", "testserver"]
+    allowed_hosts = list(set(allowed_hosts))
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+    if os.environ.get("APP_ENV") == "production":
+        from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+        app.add_middleware(HTTPSRedirectMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
+        allow_credentials=True,
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws://localhost:*; "
+            "frame-ancestors 'none';"
+        )
+        response.headers["Content-Security-Policy"] = csp
+        if os.environ.get("APP_ENV") == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
     is_prod = os.environ.get("APP_ENV") == "production"
     dist_dir = os.path.abspath(os.path.join(BASE_DIR, "../../../frontend/dist"))
@@ -207,6 +246,51 @@ def create_app() -> FastAPI:
                 from fastapi import Response
                 return Response(status_code=403, content="Forbidden")
         return await call_next(request)
+
+    @app.middleware("http")
+    async def csrf_middleware(request: Request, call_next):
+        import secrets
+        # 1. CSRF Verification for state-changing requests
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            # Bypass if authenticated by X-API-Key (service-to-service)
+            if "x-api-key" in request.headers:
+                return await call_next(request)
+            
+            # Skip check for login / signup since session doesn't exist yet
+            if request.url.path in ("/auth/login", "/auth/signup"):
+                pass
+            else:
+                csrf_cookie = request.cookies.get("aegis_csrf")
+                csrf_header = request.headers.get("X-CSRF-Token")
+                
+                if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF token verification failed"}
+                    )
+        
+        response = await call_next(request)
+        
+        # 2. CSRF Token Injection for response
+        # If the request did not have a CSRF cookie, or if it was a login/signup, set a new CSRF token.
+        # Do not set/overwrite the CSRF token if it's the logout endpoint or if CSRF token is already present
+        if request.url.path != "/auth/logout":
+            csrf_cookie = request.cookies.get("aegis_csrf")
+            is_auth_endpoint = request.url.path in ("/auth/login", "/auth/signup")
+            
+            if not csrf_cookie or is_auth_endpoint:
+                new_token = secrets.token_urlsafe(32)
+                response.set_cookie(
+                    key="aegis_csrf",
+                    value=new_token,
+                    httponly=False,  # Accessible by frontend JS
+                    secure=os.environ.get("APP_ENV") == "production",
+                    samesite="strict",
+                    path="/",
+                )
+                
+        return response
 
     from prometheus_fastapi_instrumentator import Instrumentator
     Instrumentator().instrument(app).expose(app)

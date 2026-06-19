@@ -13,6 +13,9 @@ class DifferentialPrivacyConfig(BaseModel):
     epsilon: float
     sensitivity: float
     enabled: bool
+    delta: float = 1e-5
+    mechanism: str = "laplace"  # "laplace" or "gaussian"
+    clipping_threshold: float = 1.0
 
 
 class PIIConfig(BaseModel):

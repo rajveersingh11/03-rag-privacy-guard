@@ -7,6 +7,7 @@ Reads DATABASE_URL from environment (set via .env or docker-compose).
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Generator
 
 from sqlalchemy import create_engine, text
@@ -47,28 +48,24 @@ def _get_engine():
 
 
 def init_db():
-    """Create all tables. Called on app startup."""
+    """Apply versioned migrations and initialize the session factory."""
     global SessionLocal
     engine = _get_engine()
-    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    
-    # Programmatically ensure users table exists for admin authentication
     try:
-        with engine.connect() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id            VARCHAR(36)   PRIMARY KEY,
-                    username      VARCHAR(255)  UNIQUE NOT NULL,
-                    password_hash VARCHAR(255)  NOT NULL,
-                    role          VARCHAR(50)   NOT NULL DEFAULT 'admin',
-                    created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            conn.commit()
-            logger.info("Users table verified/created")
+        from alembic import command
+        from alembic.config import Config
+
+        project_root = Path(__file__).resolve().parents[3]
+        alembic_cfg = Config(str(project_root / "alembic.ini"))
+        alembic_cfg.set_main_option(
+            "script_location", str(project_root / "src" / "aegisVault" / "db" / "alembic")
+        )
+        command.upgrade(alembic_cfg, "head")
     except Exception as e:
-        logger.error(f"Failed to create users table: {e}")
-        
+        logger.exception("Database migration failed")
+        raise RuntimeError("Database migration failed") from e
+
+    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     logger.info("Database initialised")
 
 

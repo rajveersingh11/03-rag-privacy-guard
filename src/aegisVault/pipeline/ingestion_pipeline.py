@@ -80,8 +80,41 @@ class IngestionPipeline:
 
         logger.info(f"[{doc_id}] Ingestion started | tenant={tenant_id}")
 
+        # Document hashing and scanning for invisible unicode / hidden instructions
+        raw_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        zero_width_patterns = ["\u200b", "\u200c", "\u200d", "\ufeff"]
+        found_zw = [zw for zw in zero_width_patterns if zw in text]
+        sanitized_text = text
+        for zw in zero_width_patterns:
+            sanitized_text = sanitized_text.replace(zw, "")
+            
+        lowered_text = sanitized_text.lower()
+        suspicious_phrases = [
+            "ignore previous instructions",
+            "ignore above instructions",
+            "system prompt",
+            "override instructions",
+            "you must now",
+            "assistant:",
+            "user:",
+        ]
+        found_phrases = [p for p in suspicious_phrases if p in lowered_text]
+        is_malicious = any(p in ["ignore previous instructions", "ignore above instructions", "override instructions"] for p in found_phrases)
+        
+        provenance = {
+            "hash_sha256": raw_hash,
+            "length_bytes": len(text.encode("utf-8")),
+            "invisible_chars_detected": len(found_zw) > 0,
+            "malicious_instructions_detected": is_malicious,
+            "detected_issues": found_phrases + [f"Invisible char: {zw}" for zw in found_zw],
+        }
+
         # ── Layer 1a: PII Scrub ────────────────────────────────────────
-        scan = self.scrubber.scrub(text, doc_id=doc_id)
+        scan = self.scrubber.scrub(sanitized_text, doc_id=doc_id)
+        if is_malicious:
+            scan.scrubbed_text = f"QUARANTINED_INJECTION_SCAN: {', '.join(found_phrases)}"
+            if not scan.entities_found:
+                scan.entities_found = [{"type": "prompt_injection", "entity_type": "PROMPT_INJECTION"}]
 
         if "QUARANTINED" in scan.scrubbed_text:
             # Log to DB (ingestion_log & quarantine_log)
@@ -99,12 +132,12 @@ class IngestionPipeline:
                 
                 with db_session() as session:
                     session.execute(text("""
-                        INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
-                        VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                        INSERT INTO ingestion_log (id, doc_id, document_hash, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles, provenance)
+                        VALUES (:id, :doc_id, :document_hash, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles, :provenance)
                     """), {
-                        "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                        "id": ingest_id, "doc_id": doc_id, "document_hash": raw_hash, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
                         "status": "quarantined", "reason": reason, "chunks_stored": 0, "sensitivity_class": scan.sensitivity_class,
-                        "pii_entities_found": pii_types_json, "text_modified": True, "acl_roles": json.dumps(acl_roles)
+                        "pii_entities_found": pii_types_json, "text_modified": True, "acl_roles": json.dumps(acl_roles), "provenance": json.dumps(provenance)
                     })
                     
                     session.execute(text("""
@@ -140,12 +173,13 @@ class IngestionPipeline:
                 ingest_id = str(uuid.uuid4())
                 with db_session() as session:
                     session.execute(text("""
-                        INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
-                        VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                        INSERT INTO ingestion_log (id, doc_id, document_hash, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles, provenance)
+                        VALUES (:id, :doc_id, :document_hash, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles, :provenance)
                     """), {
-                        "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                        "id": ingest_id, "doc_id": doc_id, "document_hash": raw_hash, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
                         "status": "skipped", "reason": "empty_after_scrub", "chunks_stored": 0, "sensitivity_class": scan.sensitivity_class,
-                        "pii_entities_found": json.dumps([]), "text_modified": scan.was_modified, "acl_roles": json.dumps(acl_roles)
+                        "pii_entities_found": json.dumps([]), "text_modified": scan.was_modified or len(found_zw) > 0, "acl_roles": json.dumps(acl_roles),
+                        "provenance": json.dumps(provenance)
                     })
             except Exception as e:
                 logger.error(f"Failed to log skipped document to DB: {e}")
@@ -202,13 +236,14 @@ class IngestionPipeline:
             ingest_id = str(uuid.uuid4())
             with db_session() as session:
                 session.execute(text("""
-                    INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
-                    VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                    INSERT INTO ingestion_log (id, doc_id, document_hash, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles, provenance)
+                    VALUES (:id, :doc_id, :document_hash, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles, :provenance)
                 """), {
-                    "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                    "id": ingest_id, "doc_id": doc_id, "document_hash": raw_hash, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
                     "status": "ingested", "reason": None, "chunks_stored": len(chunks), "sensitivity_class": scan.sensitivity_class,
                     "pii_entities_found": json.dumps([e.get("entity_type","") for e in scan.entities_found]),
-                    "text_modified": scan.was_modified, "acl_roles": json.dumps(acl_roles)
+                    "text_modified": scan.was_modified or len(found_zw) > 0, "acl_roles": json.dumps(acl_roles),
+                    "provenance": json.dumps(provenance)
                 })
         except Exception as e:
             logger.error(f"Failed to log ingested document to DB: {e}")
@@ -218,7 +253,7 @@ class IngestionPipeline:
             chunks_stored=len(chunks),
             sensitivity_class=scan.sensitivity_class,
             pii_entities_found=[e.get("entity_type","") for e in scan.entities_found],
-            text_modified=scan.was_modified,
+            text_modified=scan.was_modified or len(found_zw) > 0,
         )
 
 
@@ -372,7 +407,7 @@ if __name__ == "__main__":
             llm=LLMConfig(model_id="gpt-4o", temperature=0.0,
                           max_tokens=1024, system_prompt=""),
             output_sanitizer=OutputSanitizerConfig(
-                canary_tokens=["AEGIS-CANARY-ALPHA-7749"],
+                canary_tokens=["AEGIS-INTERNAL-MARKETING-PII-7749A8"],
                 alert_on_canary=True, re_scrub_output=True,
             ),
             audit=AuditConfig(scrub_before_log=True, retention_days=365,

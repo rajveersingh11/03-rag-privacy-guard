@@ -12,6 +12,29 @@ function getSettings() {
   return { baseUrl: baseUrl.replace(/\/$/, ''), apiKey };
 }
 
+function getCookie(name: string): string | null {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+  return null;
+}
+
+function getHeaders(method: string, baseHeaders: Record<string, string> = {}): Record<string, string> {
+  const { apiKey } = getSettings();
+  const headers: Record<string, string> = { ...baseHeaders };
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+  
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method.toUpperCase())) {
+    const csrfToken = getCookie('aegis_csrf');
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+  }
+  return headers;
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = 'An error occurred';
@@ -53,34 +76,39 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface AuthResponse {
+  status: string;
+  user_id: string;
+  username: string;
+  role: string;
+  tenant_id: string;
+  expires_at: string;
+}
+
 export const apiClient = {
   getHealth: async (): Promise<HealthCheckResponse> => {
-    const { baseUrl, apiKey } = getSettings();
-    const headers: HeadersInit = {};
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
-    }
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('GET');
 
     const response = await fetch(`${baseUrl}/health`, {
       method: 'GET',
       headers,
+      credentials: 'include',
     });
     return handleResponse<HealthCheckResponse>(response);
   },
 
   query: async (payload: QueryRequest): Promise<QueryResponse> => {
-    const { baseUrl, apiKey } = getSettings();
-    const headers: HeadersInit = {
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('POST', {
       'Content-Type': 'application/json',
-    };
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
-    }
+    });
 
     const response = await fetch(`${baseUrl}/query`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
+      credentials: 'include',
     });
     return handleResponse<QueryResponse>(response);
   },
@@ -91,11 +119,8 @@ export const apiClient = {
     aclRoles: string,
     runAsync: boolean
   ): Promise<IngestResponse> => {
-    const { baseUrl, apiKey } = getSettings();
-    const headers: HeadersInit = {};
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
-    }
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('POST');
 
     const formData = new FormData();
     formData.append('file', file);
@@ -106,6 +131,7 @@ export const apiClient = {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
     return handleResponse<IngestResponse>(response);
   },
@@ -116,11 +142,8 @@ export const apiClient = {
     tenantId: string,
     aclRoles: string
   ): Promise<IngestResponse> => {
-    const { baseUrl, apiKey } = getSettings();
-    const headers: HeadersInit = {};
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
-    }
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('POST');
 
     const formData = new FormData();
     formData.append('text', text);
@@ -132,41 +155,61 @@ export const apiClient = {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
     return handleResponse<IngestResponse>(response);
   },
 
   getSecurityEvents: async (limit: number = 50): Promise<SecurityEvent[]> => {
-    const { baseUrl, apiKey } = getSettings();
-    const headers: HeadersInit = {};
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
-    }
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('GET');
 
     const response = await fetch(`${baseUrl}/events?limit=${limit}`, {
       method: 'GET',
       headers,
+      credentials: 'include',
     });
     return handleResponse<SecurityEvent[]>(response);
   },
 
-  login: async (username: string, password: string): Promise<{ api_key: string; username: string; role: string }> => {
+  login: async (username: string, password: string): Promise<AuthResponse> => {
     const { baseUrl } = getSettings();
+    const headers = getHeaders('POST', {
+      'Content-Type': 'application/json',
+    });
     const response = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ username, password }),
+      credentials: 'include',
     });
-    return handleResponse<{ api_key: string; username: string; role: string }>(response);
+    return handleResponse<AuthResponse>(response);
   },
 
-  signup: async (username: string, password: string): Promise<{ api_key: string; username: string; role: string }> => {
+  signup: async (username: string, password: string): Promise<AuthResponse> => {
     const { baseUrl } = getSettings();
+    const headers = getHeaders('POST', {
+      'Content-Type': 'application/json',
+    });
     const response = await fetch(`${baseUrl}/auth/signup`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ username, password }),
+      credentials: 'include',
     });
-    return handleResponse<{ api_key: string; username: string; role: string }>(response);
+    return handleResponse<AuthResponse>(response);
+  },
+
+  logout: async (): Promise<void> => {
+    const { baseUrl } = getSettings();
+    const headers = getHeaders('POST');
+    const response = await fetch(`${baseUrl}/auth/logout`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Logout failed');
+    }
   },
 };

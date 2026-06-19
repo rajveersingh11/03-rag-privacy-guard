@@ -38,18 +38,20 @@ def test_read_limited_text_file_rejects_bad_extension():
 def test_verify_api_key_requires_configured_secret(monkeypatch):
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("API_KEYS", raising=False)
-    from aegisVault.app.deps import init_api_keys
+    from aegisVault.app.deps import init_api_keys, verify_api_key
     init_api_keys()
 
     with pytest.raises(HTTPException) as exc:
-        ingest.verify_api_key(Request(scope={"type": "http"}), "anything")
+        verify_api_key(Request(scope={"type": "http"}), "anything")
 
     assert exc.value.status_code == 503
 
 
 def test_verify_api_key_accepts_configured_secret(monkeypatch):
     monkeypatch.setenv("API_KEY", "real-secret")
-    from aegisVault.app.deps import init_api_keys
+    from aegisVault.app.deps import init_api_keys, verify_api_key
+    import hashlib
     init_api_keys()
 
-    assert ingest.verify_api_key(Request(scope={"type": "http"}), "real-secret") == "real"
+    expected = hashlib.sha256(b"real-secret").hexdigest()[:12]
+    assert verify_api_key(Request(scope={"type": "http"}), "real-secret") == expected

@@ -29,32 +29,62 @@ class DPEmbedder:
         sensitivity:    L2 sensitivity of the embedding function. Default 1.0.
     """
 
-    def __init__(self, base_embedder, epsilon: float = 1.0, sensitivity: float = 1.0):
+    def __init__(
+        self,
+        base_embedder,
+        epsilon: float = 1.0,
+        sensitivity: float = 1.0,
+        delta: float = 1e-5,
+        mechanism: str = "laplace",
+        clipping_threshold: float = 1.0,
+    ):
         self.base_embedder = base_embedder
         self.epsilon = epsilon
         self.sensitivity = sensitivity
+        self.delta = delta
+        self.mechanism = mechanism
+        self.clipping_threshold = clipping_threshold
         self._validate()
-        logger.info(f"DPEmbedder initialised | epsilon={epsilon} | sensitivity={sensitivity}")
+        logger.info(
+            f"DPEmbedder initialised | epsilon={epsilon} | sensitivity={sensitivity} | "
+            f"delta={delta} | mechanism={mechanism} | clipping_threshold={clipping_threshold}"
+        )
 
     # ── Core noise injection ───────────────────────────────────────────
 
-    def _add_laplacian_noise(self, vector: np.ndarray) -> np.ndarray:
+    def _add_dp_noise(self, vector: np.ndarray) -> np.ndarray:
         """
-        Injects Laplacian noise: noise ~ Lap(0, sensitivity/epsilon).
-        The noise scale is calibrated to the privacy budget.
-        Ensure vectors are normalized to unit length so that cosine similarity
-        in ChromaDB/FAISS remains mathematically valid.
+        Injects calibrated DP noise into the unnormalized vector using clipping.
+        Supported mechanisms:
+        - "laplace": adds noise ~ Lap(0, scale) where scale = clipping_threshold / epsilon.
+        - "gaussian": adds noise ~ N(0, sigma^2) where sigma = clipping_threshold * sqrt(2 * ln(1.25 / delta)) / epsilon.
+        
+        Finally, projects the noisy vector back onto the unit sphere for cosine similarity.
         """
-        # Ensure vector is normalized to unit length before adding noise
+        # 1. Clip the unnormalized vector to the configured clipping threshold
         norm = np.linalg.norm(vector)
-        if norm > 0:
-            vector = vector / norm
+        if norm > self.clipping_threshold:
+            vector = vector * (self.clipping_threshold / norm)
 
-        scale = self.sensitivity / self.epsilon
-        noise = np.random.laplace(loc=0.0, scale=scale, size=vector.shape)
+        # 2. Setup CSRNG for generating noise
+        import secrets
+        seed_bytes = secrets.token_bytes(16)
+        seed_int = int.from_bytes(seed_bytes, "big")
+        rng = np.random.default_rng(seed_int)
+
+        # 3. Add noise based on mechanism
+        if self.mechanism == "gaussian":
+            if self.delta <= 0:
+                raise ValueError("delta must be > 0 for Gaussian mechanism")
+            sigma = (self.clipping_threshold * np.sqrt(2 * np.log(1.25 / self.delta))) / self.epsilon
+            noise = rng.normal(loc=0.0, scale=sigma, size=vector.shape)
+        else:  # Laplace
+            scale = self.clipping_threshold / self.epsilon
+            noise = rng.laplace(loc=0.0, scale=scale, size=vector.shape)
+
         noisy = vector + noise
 
-        # Re-normalize to unit length for valid cosine distance calculations
+        # 4. Project back onto the unit sphere for valid cosine similarity
         noisy_norm = np.linalg.norm(noisy)
         if noisy_norm > 0:
             return noisy / noisy_norm
@@ -72,7 +102,7 @@ class DPEmbedder:
 
         for i, emb in enumerate(raw_embeddings):
             vec = np.array(emb, dtype=np.float64)
-            noisy = self._add_laplacian_noise(vec)
+            noisy = self._add_dp_noise(vec)
             noisy_list = noisy.tolist()
 
             stats = self.compute_noise_stats(emb, noisy_list)
@@ -139,5 +169,9 @@ class DPEmbedder:
     def _validate(self):
         if self.epsilon <= 0:
             raise ValueError(f"epsilon must be > 0, got {self.epsilon}")
-        if self.sensitivity <= 0:
-            raise ValueError(f"sensitivity must be > 0, got {self.sensitivity}")
+        if self.mechanism not in ("laplace", "gaussian"):
+            raise ValueError(f"mechanism must be 'laplace' or 'gaussian', got {self.mechanism}")
+        if self.mechanism == "gaussian" and self.delta <= 0:
+            raise ValueError(f"delta must be > 0 for Gaussian mechanism, got {self.delta}")
+        if self.clipping_threshold <= 0:
+            raise ValueError(f"clipping_threshold must be > 0, got {self.clipping_threshold}")

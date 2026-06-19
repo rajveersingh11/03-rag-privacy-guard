@@ -16,7 +16,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query, Request
 from pydantic import BaseModel
 
-from aegisVault.app.deps import verify_api_key, limiter
+from aegisVault.app.deps import get_auth_principal_or_api_key, AuthPrincipal, limiter
 from aegisVault.utils.common import get_logger
 
 logger = get_logger(__name__)
@@ -99,13 +99,17 @@ async def ingest_file(
                                   description="Comma-separated roles, e.g. employee,manager"),
     run_async:  bool       = Query(default=True, alias="async",
                                    description="Queue via Celery (true) or run synchronously (false)"),
-    _key:       str        = Depends(verify_api_key),
+    auth:       AuthPrincipal | str = Depends(get_auth_principal_or_api_key),
 ):
     """
     Ingest a file through the full privacy pipeline.
     Async (default): queues a Celery task → returns immediately with task_id.
     Sync (?async=false): runs pipeline inline → returns full result.
     """
+    if isinstance(auth, AuthPrincipal):
+        if tenant_id != auth.tenant_id:
+            raise HTTPException(status_code=403, detail="tenant_id mismatch with authenticated session")
+
     content = await _read_limited_text_file(file)
     safe_filename = Path(file.filename or "unknown").name
     metadata = {
@@ -166,9 +170,13 @@ async def ingest_text(
     source:     str   = Form(default="manual_input"),
     tenant_id:  str   = Form(default="default", pattern=r"^[a-zA-Z0-9_\-]{1,64}$"),
     acl_roles:  str   = Form(default="employee"),
-    _key:       str   = Depends(verify_api_key),
+    auth:       AuthPrincipal | str = Depends(get_auth_principal_or_api_key),
 ):
     """Ingest raw text directly (no file upload needed)."""
+    if isinstance(auth, AuthPrincipal):
+        if tenant_id != auth.tenant_id:
+            raise HTTPException(status_code=403, detail="tenant_id mismatch with authenticated session")
+
     pipeline = getattr(request.app.state, "ingestion_pipeline", None)
     if not pipeline:
         raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")

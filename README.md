@@ -1,59 +1,152 @@
 # AegisVault: Enterprise RAG Privacy Guard
 
-AegisVault is a high-security Retrieval-Augmented Generation (RAG) backend framework designed to protect sensitive data during document ingestion and LLM inference. It implements a 6-layer defense-in-depth architecture to mitigate prompt injection, cross-tenant data leakage, PII exposure, and embedding inversion risks.
+AegisVault is a high-security, production-ready Retrieval-Augmented Generation (RAG) backend framework and management command center. It is designed to protect sensitive data during both document ingestion and LLM inference. AegisVault implements a **6-layer defense-in-depth model** to mitigate prompt injection, cross-tenant data leakage, PII exposure, and embedding inversion risks.
 
-## Features
+---
 
+## 🏗️ System Architecture & Design
+
+![AegisVault System Architecture](architecture_diagram.png)
+
+AegisVault isolates the offline document ingestion pipeline from the real-time inference request-response path. 
+
+### 1. Ingestion Pipeline
+```mermaid
+graph TD
+    A["Raw Document (.txt, .md, .pdf)"] --> B["Layer 1a: PII Scrubber & Sanitization <br> (Presidio NER + zero-width space remover)"]
+    B --> C["Layer 1b: Provenance Calculator <br> (SHA-256 Document Hashing)"]
+    C --> D["Layer 1c: DP Embedder <br> (L2-Norm Clipping & Noise Injection)"]
+    D --> E["Layer 1d: Storage & Isolation"]
+    E --> F[("Chroma DB <br> (Vector Chunks)")]
+    E --> G[("Neo4j Graph <br> (Tenant RBAC boundaries)")]
+    E --> H[("MySQL / SQLite <br> (Ingestion Audit Logs)")]
+```
+
+### 2. Inference Query Pipeline
+```mermaid
+graph TD
+    A["Client Request <br> (Cookie Auth + CSRF Verification)"] --> B["Layer 2a: Raw Query Scan <br> (Semantic Router checks Injection)"]
+    B --> C["Layer 0: Standalone Query Rephrase <br> (LLM context-history rewriter)"]
+    C --> D["Layer 2b: Rephrased Query Scan <br> (Semantic Router checks Injection)"]
+    D --> E["Layer 3: RBAC Clearance Filters <br> (Graph Document ACLs + Tenant ID)"]
+    E --> F["Vector Database Search <br> (Chroma query with hard tenant filters)"]
+    F --> G["Layer 3.5: Chunk Injection Scanner <br> (Flag / Quarantine malicious retrieved data)"]
+    G --> H["Layer 4: Clean Context Builder <br> (Context Fencing + Reinforcement instructions)"]
+    H --> I["LLM Completion <br> (Gemini / OpenAI invocation)"]
+    I --> J["Layer 5: Output Sanitizer <br> (PII re-scrub + Canary Token monitor)"]
+    J --> K["Layer 6: Audit Logging <br> (Hash-chained traces in MySQL)"]
+    K --> L["Safe Output Delivered"]
+```
+
+---
+
+## ✨ Features & Layer Details
+
+*   **Authentication & Session CSRF Security**
+    *   Secure, HttpOnly, `SameSite=Strict` browser session cookie auth (`aegis_session`).
+    *   **Double-Submit Cookie CSRF Middleware**: Validates a matching `X-CSRF-Token` header for state-changing requests, preventing cross-site request forgery attacks on browser endpoints.
 *   **Layer 1: Ingestion Scrubber & DP Embedder**
     *   Uses Presidio (NER) to detect and redact PII *before* chunking.
-    *   Quarantines documents containing critical secrets (API keys, passwords, SSNs).
-    *   (Optional) Injects Laplacian noise into embeddings (Differential Privacy) to prevent inversion attacks.
+    *   Quarantines documents containing critical secrets (API keys, passwords, SSNs) and encrypts raw contents.
+    *   **Hardened DP Embedder**: Clips raw embedding vectors to an $L_2$ norm threshold to bound sensitivity, applies either **Laplace** (pure $\epsilon$-DP) or **Gaussian** (approximate $\epsilon, \delta$-DP) noise, and projects the resulting vector back to the unit hypersphere for valid cosine similarity search.
 *   **Layer 2: Semantic Router**
-    *   Classifies intents and blocks prompt injections, jailbreaks, and data exfiltration attempts before they reach the LLM or vector database.
+    *   Classifies intents and blocks prompt injections, jailbreaks, and data exfiltration attempts.
+    *   Protects the system against rephrase hijacking by scanning both the raw query and the history-rephrased standalone query.
 *   **Layer 3: RBAC & Tenant Isolation**
     *   Enforces sensitivity clearances (`PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, `RESTRICTED`).
-    *   Filters vector search results strictly based on the user's `tenant_id` and assigned `roles`.
+    *   Filters vector search results strictly based on the user's `tenant_id` and assigned `roles` inside the Chroma database query.
     *   Supports hard isolation using an optional Neo4j Knowledge Graph boundary.
+*   **Layer 3.5: Chunk Injection Scanner**
+    *   Scans retrieved database chunks for indirect prompt injection markers and zero-width characters. Flagged chunks are quarantined or demoted to lower trust status.
 *   **Layer 4: Clean Context Builder**
-    *   Constructs a sanitized, deterministic prompt structure to minimize hallucination and injection surfaces.
+    *   Constructs a sanitized, deterministic prompt structure wrapping context inside explicit `=== BEGIN/END RETRIEVED CONTENT ===` fences.
+    *   Appends reinforcement instructions to strictly restrict the LLM to context facts.
 *   **Layer 5: Output Sanitizer & Canary Detection**
     *   Scans the LLM output for generated PII and redacts it.
-    *   Monitors for Canary Tokens (fake secrets embedded in the DB) to detect and alert on data leaks.
+    *   Monitors for Canary Tokens (high-entropy realistic secrets stored in the DB, e.g. `AEGIS-INTERNAL-MARKETING-PII-*`) to detect and alert on data leaks.
 *   **Layer 6: Privacy-Safe Audit Logging**
-    *   Logs query traces, RBAC blocks, PII redactions, and latency to a relational database.
-    *   Optionally scrubs PII from the audit logs themselves.
+    *   Logs query traces, RBAC blocks, PII redactions, and latency to a relational database, generating SHA-256 chained trace hashes.
 
-## Architecture Overview
+## 📂 Repository Structure (System Template)
 
-AegisVault separates the heavy ingestion workload from the real-time inference path.
+The project follows a structured package layout defined in the initialization template ([template.py](file:///D:/Projects/portfolio/03-rag-privacy-guard/template.py)):
 
-*   **Backend:** FastAPI provides the API surface (`/ingest` and `/query`).
-*   **Ingestion (Async):** Celery + Redis orchestrate the document scanning, chunking, and embedding.
-*   **Vector Store:** ChromaDB stores the chunks and their metadata.
-*   **Graph Store:** Neo4j (optional) maintains tenant-to-document relationships for hard boundaries.
-*   **Database:** SQLAlchemy/MySQL stores the audit logs and metrics.
-*   **LLM Integration:** LangChain orchestrates calls to OpenAI or Gemini.
+```text
+├── .github/workflows/
+│   └── .gitkeep                    # GitHub CI/CD Action workflows placeholder
+├── config/
+│   └── config.yaml                 # Application path and static configurations
+├── frontend/                       # React (Vite + Tailwind CSS v4) Management Dashboard
+├── src/
+│   └── aegisVault/                 # Main backend package source
+│       ├── __init__.py
+│       ├── access/
+│       │   ├── __init__.py
+│       │   └── rbac.py             # Authorization checks and policies (RBAC)
+│       ├── app/
+│       │   ├── __init__.py
+│       │   ├── deps.py             # FastAPI dependency injection (cookie/API key authentication)
+│       │   ├── main.py             # FastAPI production initialization and lifespans
+│       │   └── routers/            # API Router endpoints (query, ingest, auth, events)
+│       ├── config/
+│       │   ├── __init__.py
+│       │   └── manager.py          # Configuration manager for parsing config/params YAML
+│       ├── constants/
+│       │   ├── __init__.py
+│       │   └── constants.py        # System constants definition
+│       ├── db/
+│       │   ├── __init__.py
+│       │   ├── session.py          # SQLAlchemy engine, session maker, and DB health checks
+│       │   └── alembic/            # Alembic schema versioning migrations directory
+│       ├── entity/
+│       │   ├── __init__.py
+│       │   ├── config_entity.py    # Pydantic schema mappings for params config
+│       │   └── artifact_entity.py  # Ingestion/Inference typing artifacts definitions
+│       ├── guards/
+│       │   ├── __init__.py
+│       │   ├── ingestion_scrubber.py # Layer 1: PII NER extraction and secret scrubbing
+│       │   ├── privacy_math.py       # Layer 1: L2 clipping and Differential Privacy noise
+│       │   ├── semantic_router.py    # Layer 2: Prompt Injection and category routing classification
+│       │   ├── graph_boundary.py     # Layer 3: Multi-tenant Graph isolation filter (Neo4j)
+│       │   └── output_sanitizer.py   # Layer 5: Canary tokens and final LLM output scrubber
+│       ├── pipeline/
+│       │   ├── __init__.py
+│       │   ├── ingestion_pipeline.py # Offline asynchronous pipeline (scrub → DP embed → vector index)
+│       │   └── inference_pipeline.py # Real-time guarded query pipeline (scrub → retrieve → context → LLM)
+│       ├── utils/
+│       │   ├── __init__.py
+│       │   └── common.py             # Common utilities (custom logging and parsing helpers)
+│       └── worker.py                 # Celery asynchronous execution entry point
+├── tests/                          # Pytest suite
+│   ├── test_auth.py                # Admin session & cookie CSRF security testing
+│   ├── test_dp_embedder.py         # DP math, L2-clipping & Gaussian noise verification tests
+│   └── test_security_controls.py   # RBAC, semantic router fail-close, and ingestion scrub tests
+├── params.yaml                     # Main operational parameters (Epsilon, confidence threshold, etc.)
+├── run.py                          # Stack command-line orchestrator and entry launcher
+├── setup.py                        # Makes backend installable as a pip package
+├── requirements.txt                # Basic python package requirements definition
+├── docker-compose.yaml             # Spins up backing containers (Redis, MySQL, Neo4j, Chroma)
+└── template.py                     # Repository initialization script detailing structural layout
+```
 
-## Threat Model & Mitigations
+---
 
-| Threat | AegisVault Mitigation |
-| :--- | :--- |
-| **Prompt Injection** | Semantic Router intent classification (Fail-closed). |
-| **Cross-Tenant Leakage** | Hard filtering on `tenant_id` at the vector search level. |
-| **Over-clearance Access** | RBAC filtering on document chunks based on sensitivity class. |
-| **Accidental PII Ingestion**| Presidio NER scrubbing at ingestion time. |
-| **Embedding Inversion** | Differential Privacy (Laplacian noise) injected into vectors. |
-| **LLM Data Exfiltration** | Output Sanitizer + Canary Token monitoring. |
+## 🛠️ Setup & Execution
 
-## Setup & Execution
+### 1. Clone the Repository
+Clone the repository using HTTPS or SSH and navigate to the project root:
+```bash
+# Via HTTPS
+git clone https://github.com/rajveersingh11/03-rag-privacy-guard.git
+cd 03-rag-privacy-guard
 
-### Prerequisites
-*   Python 3.12+
-*   `uv` package manager (recommended) or `pip`
-*   Docker & Docker Compose (for supporting services)
+# Or via SSH
+git clone git@github.com:rajveersingh11/03-rag-privacy-guard.git
+cd 03-rag-privacy-guard
+```
 
-### Environment Variables
-Copy `.env.example` to `.env` and configure:
+### 2. Environment Variables
+Copy `.env.example` to `.env` and configure your credentials:
 ```text
 APP_ENV=development
 API_KEY=your_secret_api_key_here
@@ -67,75 +160,49 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 
-# Security
+# Security & Privacy Math
 QUARANTINE_ENCRYPTION_KEY=your_32_byte_base64_fernet_key
 CORS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:5173
 MAX_DP_QUERIES_PER_USER_PER_DAY=100
 METRICS_TOKEN=your_metrics_scraping_token
-LLAMA_GUARD_ENDPOINT=http://localhost:8010/v1
 ```
 
-### Installation & Running (Development Mode)
+### 3. Unified Runner (`run.py`)
+All services can be orchestrated using the [run.py](file:///D:/Projects/portfolio/03-rag-privacy-guard/run.py) script located in the root directory.
 
-#### 1. Backend Setup
-1. Sync python dependencies:
-   ```powershell
-   uv sync
-   $env:PYTHONPATH="src"
-   ```
-2. Start backing services (Redis, Neo4j, MySQL):
-   ```powershell
-   docker compose up -d
-   ```
-3. Start the FastAPI server:
-   ```powershell
-   uvicorn aegisVault.app.main:app --reload --port 8000
-   ```
-4. Start the Celery worker (in a separate terminal):
-   ```powershell
-   celery -A aegisVault.worker worker --loglevel=info --concurrency=4
-   ```
+#### 💻 Local Development Stack
+Runs backing compose containers, Celery workers, and Vite frontend hot-reloads simultaneously:
+```powershell
+python run.py dev
+```
+*Vite frontend is accessible at `http://localhost:5173/`.*
 
-#### 2. Frontend Setup
-1. Open a new terminal and install dependencies:
-   ```bash
-   cd frontend
-   npm install
-   ```
-2. Start Vite's development client server:
-   ```bash
-   npm run dev
-   ```
-3. Open `http://localhost:5173` in your browser. Since authentication is required, you will see the AegisVault Control Center Authentication screen.
-4. **Provision Account:** Switch to "Provision Account", input an admin username and password, and click "Create Account". This automatically creates the schema table in the SQL DB, computes a secure PBKDF2 hash, registers the admin, and logs you in.
-5. **Admin Sign In:** For subsequent visits, sign in under "Admin Sign In" with your credentials. On successful login, the gateway retrieves and configures the active `API_KEY` in the frontend session automatically, unlocking access to the operations command dashboard.
+#### 🚀 Production Build & Serve
+Compiles the React frontend static bundles and serves them directly through the FastAPI endpoint:
+```powershell
+python run.py prod
+```
+*Unified application is accessible at `http://localhost:8000/`.*
 
+#### 🛑 Stop Docker Compose Containers
+```powershell
+python run.py stop
+```
 
 ---
 
-### Running (Production serving Mode)
+## 🧪 Development & Testing
 
-FastAPI can directly host and serve the built React static files:
-1. Build the production assets inside the frontend directory:
-   ```bash
-   cd frontend
-   npm run build
-   ```
-2. Run the FastAPI backend in production mode by setting `APP_ENV=production`:
-   * On Windows Powershell:
-     ```powershell
-     $env:APP_ENV="production"
-     uvicorn aegisVault.app.main:app --port 8000
-     ```
-   * On Linux/macOS:
-     ```bash
-     APP_ENV=production uvicorn aegisVault.app.main:app --port 8000
-     ```
-3. Open `http://127.0.0.1:8000` in your browser. The backend will directly serve the compiled React bundle from `frontend/dist/`.
+Run the security unit tests (which validates cookie sessions, CSRF headers, and unnormalized DP clipping bounds):
+```powershell
+python run.py test
+```
 
-## API Examples
+---
 
-### 1. Ingest a Document
+## 🔌 API Examples
+
+### 1. Ingest a Document (S2S API Key Auth)
 ```powershell
 curl -X POST "http://127.0.0.1:8000/ingest/file?async=false" `
   -H "X-API-Key: $env:API_KEY" `
@@ -144,7 +211,7 @@ curl -X POST "http://127.0.0.1:8000/ingest/file?async=false" `
   -F "acl_roles=executive,manager"
 ```
 
-### 2. Guarded Query
+### 2. Guarded Query (S2S API Key Auth)
 ```powershell
 curl -X POST "http://127.0.0.1:8000/query" `
   -H "Content-Type: application/json" `
@@ -157,13 +224,7 @@ curl -X POST "http://127.0.0.1:8000/query" `
   }'
 ```
 
-### 3. Retrieve Security Events (Compliance Audit Ledger)
-```powershell
-curl -X GET "http://127.0.0.1:8000/events?limit=10" `
-  -H "X-API-Key: $env:API_KEY"
-```
-
-### 4. Admin Account Provision (Signup)
+### 3. Admin Account Provision (CSRF Bypassed Signup)
 ```powershell
 curl -X POST "http://127.0.0.1:8000/auth/signup" `
   -H "Content-Type: application/json" `
@@ -172,42 +233,10 @@ curl -X POST "http://127.0.0.1:8000/auth/signup" `
     "password": "supersecurepassword"
   }'
 ```
+*(Sets browser session cookie `aegis_session` and CSRF cookie `aegis_csrf`)*
 
-### 5. Admin Login
+### 4. Admin Logout (Session Revocation & Cookie Cleanup)
 ```powershell
-curl -X POST "http://127.0.0.1:8000/auth/login" `
-  -H "Content-Type: application/json" `
-  -d '{
-    "username": "superadmin",
-    "password": "supersecurepassword"
-  }'
-```
-
-
-## Screenshots
-*(Add screenshots of the frontend UI here once integrated)*
-- Dashboard showing blocked queries vs successful queries
-- Quarantine view showing redacted secrets
-- RBAC simulator
-
-## Known Limitations
-*   **Semantic Router Latency:** Local HuggingFace models for intent classification can add 100-300ms overhead.
-*   **DP Noise Degradation:** High epsilon values in Differential Privacy may reduce the accuracy of semantic search.
-*   **Local ChromaDB:** Default deployment uses local ChromaDB. For horizontal scaling, migrate to Chroma HTTP Client or Qdrant.
-
-## Production Hardening Checklist
-- [ ] Migrate secret management to HashiCorp Vault or AWS Secrets Manager.
-- [ ] Implement robust Identity Provider (IdP) integration (OAuth2/OIDC) instead of static API keys.
-- [ ] Replace local SQLite/MySQL with managed RDS/Aurora.
-- [ ] Enable centralized logging (ELK, Datadog) for the audit stream.
-- [ ] Implement key rotation for the `QUARANTINE_ENCRYPTION_KEY`.
-- [ ] Tune LLM fallback models for the Semantic Router.
-
-## Development
-```powershell
-# Run tests
-pytest
-
-# Type checking
-mypy src
+curl -X POST "http://127.0.0.1:8000/auth/logout" `
+  -H "X-CSRF-Token: your_aegis_csrf_value"
 ```

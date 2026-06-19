@@ -42,7 +42,6 @@ def make_config(**overrides):
         audit=AuditConfig(scrub_before_log=True, retention_days=30, log_level="INFO"),
         celery=CeleryConfig(broker_url="redis://local", result_backend="redis://local", task_serializer="json", worker_concurrency=1, quarantine_dir="./data/quarantine"),
     )
-    return cfg
     for key, value in overrides.items():
         cfg = replace(cfg, **{key: value})
     return cfg
@@ -75,7 +74,9 @@ def test_rbac_does_not_use_substring_acl_matching():
 def test_semantic_router_fail_closed_blocks_classifier_errors():
     cfg = SemanticRouterConfig(model_id="guard", fallback_model="missing", device="cpu", confidence_threshold=0.85, block_categories=["prompt_injection"], fail_closed=True, classifier_backend="local_hf")
     router = SemanticRouter(cfg)
-    router._get_classifier = lambda: (_ for _ in ()).throw(RuntimeError("model unavailable"))
+    def mock_classify(query, cfg):
+        raise RuntimeError("model unavailable")
+    router._backend.classify = mock_classify
 
     decision = router.route("normal question")
 
@@ -115,7 +116,12 @@ def test_inference_uses_graph_doc_ids_and_similarity_threshold(monkeypatch):
 
     class Vectorstore:
         def similarity_search_with_relevance_scores(self, query, k, filter=None):
-            assert filter == {"doc_id": {"$in": ["allowed-doc"]}}
+            assert filter == {
+                "$and": [
+                    {"tenant_id": "default"},
+                    {"doc_id": {"$in": ["allowed-doc"]}}
+                ]
+            }
             return [
                 (SimpleNamespace(page_content="allowed context", metadata={
                     "doc_id": "allowed-doc",

@@ -56,8 +56,14 @@ def ingest_document_task(self, text: str, metadata: dict,
             cfg = get_config()
 
             base_embedder = HuggingFaceEmbeddings(model_name=cfg.retrieval.embedding_model)
-            dp_embedder   = DPEmbedder(base_embedder, cfg.dp.epsilon, cfg.dp.sensitivity) \
-                            if cfg.dp.enabled else base_embedder
+            dp_embedder   = DPEmbedder(
+                                base_embedder=base_embedder,
+                                epsilon=cfg.dp.epsilon,
+                                sensitivity=cfg.dp.sensitivity,
+                                delta=cfg.dp.delta,
+                                mechanism=cfg.dp.mechanism,
+                                clipping_threshold=cfg.dp.clipping_threshold,
+                            ) if cfg.dp.enabled else base_embedder
 
             chroma_host = os.environ.get("CHROMA_HOST", None)
             if chroma_host:

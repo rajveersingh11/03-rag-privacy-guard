@@ -12,7 +12,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from aegisVault.app.deps import verify_api_key, limiter
+from aegisVault.app.deps import get_auth_principal_or_api_key, AuthPrincipal, limiter
 
 router = APIRouter()
 
@@ -54,7 +54,7 @@ class QueryResponse(BaseModel):
 async def run_query(
     req: QueryRequest,
     request: Request,
-    _key: str = Depends(verify_api_key),
+    auth: AuthPrincipal | str = Depends(get_auth_principal_or_api_key),
 ):
     """
     Run a fully guarded RAG query through all 6 security layers:
@@ -65,6 +65,14 @@ async def run_query(
     - Layer 5: Output sanitizer (PII scrub + canary check)
     - Layer 6: Privacy-safe audit log
     """
+    if isinstance(auth, AuthPrincipal):
+        # Tie user identity claims strictly to the authenticated session attributes
+        if req.user_id != auth.user_id:
+            raise HTTPException(status_code=403, detail="user_id mismatch with authenticated session")
+        if req.tenant_id != auth.tenant_id:
+            raise HTTPException(status_code=403, detail="tenant_id mismatch with authenticated session")
+        if not all(role in auth.roles for role in req.user_roles):
+            raise HTTPException(status_code=403, detail="user_roles exceed authenticated session permissions")
     pipeline = getattr(request.app.state, "inference_pipeline", None)
     if not pipeline:
         raise HTTPException(status_code=503, detail="Inference pipeline not ready")
