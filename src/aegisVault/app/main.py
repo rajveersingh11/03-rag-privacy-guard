@@ -145,6 +145,8 @@ def create_app() -> FastAPI:
         openapi_tags=[
             {"name": "Query", "description": "Guarded real-time query interface"},
             {"name": "Ingest", "description": "Document ingestion with PII scrubbing and DP embedding"},
+            {"name": "Events", "description": "Security events and compliance audit logs"},
+            {"name": "Auth", "description": "Admin authentication and user provisioning"},
             {"name": "System", "description": "Health probes and metrics"},
             {"name": "UI", "description": "Web interface"},
         ]
@@ -212,9 +214,13 @@ def create_app() -> FastAPI:
     # ── Register routers ────────────────────────────────────────────
     from aegisVault.app.routers.query  import router as query_router
     from aegisVault.app.routers.ingest import router as ingest_router
+    from aegisVault.app.routers.events import router as events_router
+    from aegisVault.app.routers.auth   import router as auth_router
 
     app.include_router(query_router,  prefix="/query",  tags=["Query"])
     app.include_router(ingest_router, prefix="/ingest", tags=["Ingest"])
+    app.include_router(events_router, prefix="/events", tags=["Events"])
+    app.include_router(auth_router,   prefix="/auth",   tags=["Auth"])
 
     # ── UI Serving ──────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse, tags=["UI"])

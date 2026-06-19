@@ -54,23 +54,40 @@ class InferencePipeline:
 
     def _check_dp_budget(self, user_id: str) -> bool:
         import os
+        import redis
         from aegisVault.app.metrics import aegis_dp_budget_exceeded_total
         max_queries = int(os.environ.get("MAX_DP_QUERIES_PER_USER_PER_DAY", "100"))
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         
-        if not hasattr(self, "_dp_budgets"):
-            self._dp_budgets = {}
-            self._dp_budgets_date = time.strftime("%Y-%m-%d")
+        try:
+            r = redis.Redis.from_url(redis_url)
+            current_date = time.strftime("%Y-%m-%d")
+            key = f"dp_budget:{user_id}:{current_date}"
             
-        current_date = time.strftime("%Y-%m-%d")
-        if current_date != self._dp_budgets_date:
-            self._dp_budgets = {}
-            self._dp_budgets_date = current_date
-            
-        self._dp_budgets[user_id] = self._dp_budgets.get(user_id, 0) + 1
-        if self._dp_budgets[user_id] > max_queries:
-            aegis_dp_budget_exceeded_total.inc()
-            return False
-        return True
+            count = r.incr(key)
+            if count == 1:
+                r.expire(key, 86400)  # Expire key in 24 hours
+                
+            if count > max_queries:
+                aegis_dp_budget_exceeded_total.inc()
+                return False
+            return True
+        except Exception as e:
+            logger.warning(f"Redis DP budget check failed: {e}. Falling back to in-memory tracking.")
+            if not hasattr(self, "_dp_budgets"):
+                self._dp_budgets = {}
+                self._dp_budgets_date = time.strftime("%Y-%m-%d")
+                
+            current_date = time.strftime("%Y-%m-%d")
+            if current_date != self._dp_budgets_date:
+                self._dp_budgets = {}
+                self._dp_budgets_date = current_date
+                
+            self._dp_budgets[user_id] = self._dp_budgets.get(user_id, 0) + 1
+            if self._dp_budgets[user_id] > max_queries:
+                aegis_dp_budget_exceeded_total.inc()
+                return False
+            return True
 
     def query(
         self,
@@ -102,6 +119,21 @@ class InferencePipeline:
         route = self.router.route(standalone_query)
         if route.action == "block":
             logger.warning(f"[{trace_id}] BLOCKED | user={user_id} | reason={route.category}")
+            try:
+                from sqlalchemy import text
+                from aegisVault.db.session import db_session
+                stmt = text("""
+                    INSERT INTO injection_attempts (id, trace_id, user_id, tenant_id, raw_query, action, category, confidence)
+                    VALUES (:id, :tid, :uid, :tenant, :q, :action, :cat, :conf)
+                """)
+                with db_session() as session:
+                    session.execute(stmt, {
+                        "id": str(uuid.uuid4()), "tid": trace_id, "uid": user_id, "tenant": tenant_id,
+                        "q": user_query, "action": route.action, "cat": route.category, "conf": route.confidence
+                    })
+            except Exception as e:
+                logger.error(f"Failed logging injection attempt to DB: {e}")
+
             return self._blocked_response(trace_id, user_query, route.category,
                                           int((time.time()-start_ms)*1000))
 
@@ -242,6 +274,20 @@ class InferencePipeline:
             logger.critical(
                 f"[{trace_id}] CANARY LEAK | user={user_id} | tokens={sanitized.canary_tokens_found}"
             )
+            try:
+                from sqlalchemy import text
+                from aegisVault.db.session import db_session
+                with db_session() as session:
+                    for token in sanitized.canary_tokens_found:
+                        session.execute(text("""
+                            INSERT INTO canary_alerts (id, trace_id, user_id, tenant_id, canary_token, query)
+                            VALUES (:id, :tid, :uid, :tenant, :token, :q)
+                        """), {
+                            "id": str(uuid.uuid4()), "tid": trace_id, "uid": user_id, "tenant": tenant_id,
+                            "token": token, "q": safe_query
+                        })
+            except Exception as e:
+                logger.error(f"Failed logging canary leak to DB: {e}")
 
         # ── Layer 6: Audit log ─────────────────────────────────────────
         self._audit(trace_id, user_id, tenant_id, safe_query, sanitized.safe_response,
@@ -260,6 +306,8 @@ class InferencePipeline:
         if len(self.history[session_id]) > 10:
             self.history[session_id] = self.history[session_id][-10:]
 
+        hallucination = self._evaluate_hallucination_risk(sanitized.safe_response, context)
+
         return InferenceArtifact(
             trace_id=trace_id,
             query=safe_query,
@@ -268,11 +316,42 @@ class InferencePipeline:
             rbac_blocked=blocked_count,
             pii_redacted=sanitized.pii_redacted,
             canary_leaked=sanitized.canary_leaked,
-            hallucination_risk="low",  # extend with hallucination detector
+            hallucination_risk=hallucination,
             latency_ms=latency_ms,
         )
 
     # ── Helpers ────────────────────────────────────────────────────────
+
+    def _evaluate_hallucination_risk(self, response: str, context: str) -> str:
+        """
+        Computes the hallucination risk based on keyword containment.
+        If response contains claims that have extremely low overlap with the context, risk is HIGH.
+        """
+        if not context or not response:
+            return "none"
+            
+        import re
+        stop_words = {"the", "a", "an", "and", "or", "but", "if", "then", "else", "of", "at", "by", "for", "with", "about", "to", "in", "on", "is", "are", "was", "were", "be", "been", "have", "has", "had", "this", "that", "it", "they", "we", "you", "he", "she", "our", "their"}
+        
+        def get_keywords(text: str):
+            words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+            return {w for w in words if w not in stop_words}
+            
+        ctx_words = get_keywords(context)
+        resp_words = get_keywords(response)
+        
+        if not resp_words:
+            return "low"
+            
+        overlap = resp_words.intersection(ctx_words)
+        overlap_ratio = len(overlap) / len(resp_words)
+        
+        if overlap_ratio >= 0.35:
+            return "low"
+        elif overlap_ratio >= 0.15:
+            return "medium"
+        else:
+            return "high"
 
     def _retrieve_candidates(self, safe_query: str, fetch_k: int,
                              authorized_doc_ids: Optional[set] = None):

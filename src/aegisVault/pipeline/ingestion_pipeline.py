@@ -84,6 +84,39 @@ class IngestionPipeline:
         scan = self.scrubber.scrub(text, doc_id=doc_id)
 
         if "QUARANTINED" in scan.scrubbed_text:
+            # Log to DB (ingestion_log & quarantine_log)
+            try:
+                import uuid
+                import json
+                from sqlalchemy import text
+                from aegisVault.db.session import db_session
+                
+                ingest_id = str(uuid.uuid4())
+                quar_id = str(uuid.uuid4())
+                reason = scan.entities_found[0]["type"] if scan.entities_found else "unknown"
+                pii_types_json = json.dumps([e.get("entity_type","") for e in scan.entities_found])
+                quar_file_path = os.path.join(self.cfg.celery.quarantine_dir, f"{doc_id}_{reason}.enc")
+                
+                with db_session() as session:
+                    session.execute(text("""
+                        INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
+                        VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                    """), {
+                        "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                        "status": "quarantined", "reason": reason, "chunks_stored": 0, "sensitivity_class": scan.sensitivity_class,
+                        "pii_entities_found": pii_types_json, "text_modified": True, "acl_roles": json.dumps(acl_roles)
+                    })
+                    
+                    session.execute(text("""
+                        INSERT INTO quarantine_log (id, doc_id, tenant_id, reason, pii_types, file_path, source)
+                        VALUES (:id, :doc_id, :tenant_id, :reason, :pii_types, :file_path, :source)
+                    """), {
+                        "id": quar_id, "doc_id": doc_id, "tenant_id": tenant_id, "reason": reason,
+                        "pii_types": pii_types_json, "file_path": quar_file_path, "source": metadata.get("source", "unknown")
+                    })
+            except Exception as e:
+                logger.error(f"Failed to log quarantined document to DB: {e}")
+
             return IngestionArtifact(
                 doc_id=doc_id, status="quarantined",
                 reason=scan.entities_found[0]["type"] if scan.entities_found else "unknown",
@@ -97,6 +130,26 @@ class IngestionPipeline:
         # ── Layer 1b: Chunk ────────────────────────────────────────────
         chunks = self.splitter.split_text(scan.scrubbed_text)
         if not chunks:
+            # Log to DB (ingestion_log)
+            try:
+                import uuid
+                import json
+                from sqlalchemy import text
+                from aegisVault.db.session import db_session
+                
+                ingest_id = str(uuid.uuid4())
+                with db_session() as session:
+                    session.execute(text("""
+                        INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
+                        VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                    """), {
+                        "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                        "status": "skipped", "reason": "empty_after_scrub", "chunks_stored": 0, "sensitivity_class": scan.sensitivity_class,
+                        "pii_entities_found": json.dumps([]), "text_modified": scan.was_modified, "acl_roles": json.dumps(acl_roles)
+                    })
+            except Exception as e:
+                logger.error(f"Failed to log skipped document to DB: {e}")
+
             return IngestionArtifact(
                 doc_id=doc_id, status="skipped", reason="empty_after_scrub",
                 chunks_stored=0, sensitivity_class=scan.sensitivity_class,
@@ -138,6 +191,27 @@ class IngestionPipeline:
             f"sensitivity={scan.sensitivity_class} | "
             f"pii_modified={scan.was_modified}"
         )
+
+        # Log to DB (ingestion_log)
+        try:
+            import uuid
+            import json
+            from sqlalchemy import text
+            from aegisVault.db.session import db_session
+            
+            ingest_id = str(uuid.uuid4())
+            with db_session() as session:
+                session.execute(text("""
+                    INSERT INTO ingestion_log (id, doc_id, tenant_id, source, status, reason, chunks_stored, sensitivity_class, pii_entities_found, text_modified, acl_roles)
+                    VALUES (:id, :doc_id, :tenant_id, :source, :status, :reason, :chunks_stored, :sensitivity_class, :pii_entities_found, :text_modified, :acl_roles)
+                """), {
+                    "id": ingest_id, "doc_id": doc_id, "tenant_id": tenant_id, "source": metadata.get("source", "unknown"),
+                    "status": "ingested", "reason": None, "chunks_stored": len(chunks), "sensitivity_class": scan.sensitivity_class,
+                    "pii_entities_found": json.dumps([e.get("entity_type","") for e in scan.entities_found]),
+                    "text_modified": scan.was_modified, "acl_roles": json.dumps(acl_roles)
+                })
+        except Exception as e:
+            logger.error(f"Failed to log ingested document to DB: {e}")
 
         return IngestionArtifact(
             doc_id=doc_id, status="ingested", reason=None,

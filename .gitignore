@@ -73,6 +73,7 @@ docs/_build/
 
 # SQLite
 *.sqlite3
+*.db
 
 # Python virtual environment metadata
 .pytype/

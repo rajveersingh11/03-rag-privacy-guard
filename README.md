@@ -70,6 +70,9 @@ NEO4J_PASSWORD=password
 # Security
 QUARANTINE_ENCRYPTION_KEY=your_32_byte_base64_fernet_key
 CORS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:5173
+MAX_DP_QUERIES_PER_USER_PER_DAY=100
+METRICS_TOKEN=your_metrics_scraping_token
+LLAMA_GUARD_ENDPOINT=http://localhost:8010/v1
 ```
 
 ### Installation & Running (Development Mode)
@@ -103,7 +106,10 @@ CORS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:5173
    ```bash
    npm run dev
    ```
-3. Open `http://localhost:5173` in your browser. Go to **System Settings** page, enter your API base URL (`http://127.0.0.1:8000`) and API key to connect.
+3. Open `http://localhost:5173` in your browser. Since authentication is required, you will see the AegisVault Control Center Authentication screen.
+4. **Provision Account:** Switch to "Provision Account", input an admin username and password, and click "Create Account". This automatically creates the schema table in the SQL DB, computes a secure PBKDF2 hash, registers the admin, and logs you in.
+5. **Admin Sign In:** For subsequent visits, sign in under "Admin Sign In" with your credentials. On successful login, the gateway retrieves and configures the active `API_KEY` in the frontend session automatically, unlocking access to the operations command dashboard.
+
 
 ---
 
@@ -150,6 +156,33 @@ curl -X POST "http://127.0.0.1:8000/query" `
     "tenant_id": "acme_corp"
   }'
 ```
+
+### 3. Retrieve Security Events (Compliance Audit Ledger)
+```powershell
+curl -X GET "http://127.0.0.1:8000/events?limit=10" `
+  -H "X-API-Key: $env:API_KEY"
+```
+
+### 4. Admin Account Provision (Signup)
+```powershell
+curl -X POST "http://127.0.0.1:8000/auth/signup" `
+  -H "Content-Type: application/json" `
+  -d '{
+    "username": "superadmin",
+    "password": "supersecurepassword"
+  }'
+```
+
+### 5. Admin Login
+```powershell
+curl -X POST "http://127.0.0.1:8000/auth/login" `
+  -H "Content-Type: application/json" `
+  -d '{
+    "username": "superadmin",
+    "password": "supersecurepassword"
+  }'
+```
+
 
 ## Screenshots
 *(Add screenshots of the frontend UI here once integrated)*

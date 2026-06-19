@@ -16,6 +16,11 @@ interface AppContextType {
   apiKey: string;
   saveSettings: (baseUrl: string, apiKey: string) => void;
   clearSettings: () => void;
+
+  // Auth state
+  user: { username: string; role: string } | null;
+  loginUser: (username: string, apiKey: string, role: string) => void;
+  logoutUser: () => void;
   
   // Toasts
   toasts: Toast[];
@@ -44,6 +49,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [apiKey, setApiKey] = useState(() => {
     return localStorage.getItem('ae_api_key') || '';
   });
+
+  // Auth state
+  const [user, setUser] = useState<{ username: string; role: string } | null>(() => {
+    const saved = localStorage.getItem('ae_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const loginUser = (username: string, key: string, role: string) => {
+    localStorage.setItem('ae_api_key', key);
+    const userObj = { username, role };
+    localStorage.setItem('ae_user', JSON.stringify(userObj));
+    setApiKey(key);
+    setUser(userObj);
+    showToast(`Welcome back, ${username}!`, 'success');
+  };
+
+  const logoutUser = () => {
+    localStorage.removeItem('ae_api_key');
+    localStorage.removeItem('ae_user');
+    setApiKey('');
+    setUser(null);
+    showToast('Logged out successfully', 'info');
+  };
 
   const saveSettings = (newUrl: string, newKey: string) => {
     localStorage.setItem('ae_base_url', newUrl);
@@ -78,11 +106,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // 3. Events state (local persistence)
-  const [events, setEvents] = useState<SecurityEvent[]>(() => {
-    const saved = localStorage.getItem('ae_events');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // 3. Events state (local persistence + backend sync)
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+
+  const refreshEvents = useCallback(async () => {
+    try {
+      const data = await apiClient.getSecurityEvents(100);
+      setEvents(data);
+      localStorage.setItem('ae_events', JSON.stringify(data));
+    } catch (err) {
+      console.error('Failed to fetch security events:', err);
+      // Fallback to localStorage if offline
+      const saved = localStorage.getItem('ae_events');
+      if (saved) {
+        setEvents(JSON.parse(saved));
+      }
+    }
+  }, []);
 
   const addEvent = useCallback((eventData: Omit<SecurityEvent, 'id' | 'time'>) => {
     const newEvent: SecurityEvent = {
@@ -92,16 +132,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     
     setEvents((prev) => {
-      const updated = [newEvent, ...prev].slice(0, 100); // limit to last 100 events
+      const updated = [newEvent, ...prev].slice(0, 100);
       localStorage.setItem('ae_events', JSON.stringify(updated));
       return updated;
     });
-  }, []);
+
+    // Refresh from database in background after a brief delay
+    setTimeout(() => {
+      refreshEvents();
+    }, 1500);
+  }, [refreshEvents]);
 
   const clearEvents = () => {
     localStorage.removeItem('ae_events');
     setEvents([]);
-    showToast('Audit log events cleared', 'info');
+    showToast('Audit log view cleared locally', 'info');
   };
 
   // 4. System Health state
@@ -126,14 +171,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Run initial health check on load, and set up polling every 30 seconds
+  // Run initial checks on load, and set up polling every 30 seconds
   useEffect(() => {
     refreshHealth();
+    if (apiKey) {
+      refreshEvents();
+    }
     const interval = setInterval(() => {
       refreshHealth();
+      if (apiKey) {
+        refreshEvents();
+      }
     }, 30000);
     return () => clearInterval(interval);
-  }, [refreshHealth, baseUrl, apiKey]); // run again if settings change
+  }, [refreshHealth, refreshEvents, baseUrl, apiKey]); // run again if settings change
 
   return (
     <AppContext.Provider
@@ -142,6 +193,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiKey,
         saveSettings,
         clearSettings,
+        user,
+        loginUser,
+        logoutUser,
         toasts,
         showToast,
         removeToast,

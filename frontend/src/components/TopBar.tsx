@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, RefreshCw, Server, ShieldCheck } from 'lucide-react';
+import { Menu, RefreshCw, Server, ShieldCheck, LogOut, Lock } from 'lucide-react';
 import { useApp } from './AppContext';
 
 interface TopBarProps {
@@ -8,7 +8,7 @@ interface TopBarProps {
 }
 
 export const TopBar: React.FC<TopBarProps> = ({ activePage, onMenuToggle }) => {
-  const { baseUrl, refreshHealth, loadingHealth, health } = useApp();
+  const { baseUrl, refreshHealth, loadingHealth, health, user, logoutUser } = useApp();
 
   const getPageTitle = (id: string) => {
     switch (id) {
@@ -78,7 +78,28 @@ export const TopBar: React.FC<TopBarProps> = ({ activePage, onMenuToggle }) => {
         >
           <RefreshCw className={`w-4 h-4 ${loadingHealth ? 'animate-spin text-blue-400' : ''}`} />
         </button>
+
+        {/* User Profile Chip */}
+        {user && (
+          <div className="flex items-center space-x-2 text-[10px] font-mono bg-blue-950/40 border border-blue-900/80 px-3 py-1.5 rounded-lg text-blue-400">
+            <Lock className="w-3.5 h-3.5 text-blue-500" />
+            <span className="text-blue-500 uppercase">{user.role}:</span>
+            <span className="text-blue-200 font-semibold">{user.username}</span>
+          </div>
+        )}
+
+        {/* Logout Button */}
+        {user && (
+          <button
+            onClick={logoutUser}
+            className="p-2 text-rose-400 hover:text-rose-200 border border-rose-950/80 hover:border-rose-900/80 bg-rose-950/20 hover:bg-rose-950/40 rounded-lg transition-colors"
+            title="Terminate Admin Session"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </header>
   );
 };
+

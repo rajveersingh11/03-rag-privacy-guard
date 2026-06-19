@@ -1,4 +1,4 @@
-import type { HealthCheckResponse, QueryRequest, QueryResponse, IngestResponse } from '../types';
+import type { HealthCheckResponse, QueryRequest, QueryResponse, IngestResponse, SecurityEvent } from '../types';
 
 export interface ApiClientError {
   status?: number;
@@ -134,5 +134,39 @@ export const apiClient = {
       body: formData,
     });
     return handleResponse<IngestResponse>(response);
+  },
+
+  getSecurityEvents: async (limit: number = 50): Promise<SecurityEvent[]> => {
+    const { baseUrl, apiKey } = getSettings();
+    const headers: HeadersInit = {};
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+
+    const response = await fetch(`${baseUrl}/events?limit=${limit}`, {
+      method: 'GET',
+      headers,
+    });
+    return handleResponse<SecurityEvent[]>(response);
+  },
+
+  login: async (username: string, password: string): Promise<{ api_key: string; username: string; role: string }> => {
+    const { baseUrl } = getSettings();
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return handleResponse<{ api_key: string; username: string; role: string }>(response);
+  },
+
+  signup: async (username: string, password: string): Promise<{ api_key: string; username: string; role: string }> => {
+    const { baseUrl } = getSettings();
+    const response = await fetch(`${baseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return handleResponse<{ api_key: string; username: string; role: string }>(response);
   },
 };

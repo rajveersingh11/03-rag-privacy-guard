@@ -52,6 +52,33 @@ class IngestionScrubber:
         self.quarantine_dir = ensure_dir(quarantine_dir)
         self.analyzer  = AnalyzerEngine()
         self.anonymizer = AnonymizerEngine()
+
+        # Register custom recognizers to extend Presidio's coverage
+        from presidio_analyzer import PatternRecognizer, Pattern
+        
+        # 1. Indian PAN (Permanent Account Number) recognizer
+        pan_pattern = Pattern(
+            name="pan_pattern",
+            regex=r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b",
+            score=0.85
+        )
+        pan_recognizer = PatternRecognizer(
+            supported_entity="IN_PAN",
+            patterns=[pan_pattern]
+        )
+        self.analyzer.registry.add_recognizer(pan_recognizer)
+        
+        # 2. Indian Aadhaar card number recognizer (12 digits, often spaced in 4s)
+        aadhaar_pattern = Pattern(
+            name="aadhaar_pattern",
+            regex=r"\b[2-9]{1}[0-9]{3}[ \-][0-9]{4}[ \-][0-9]{4}\b|\b[2-9]{1}[0-9]{11}\b",
+            score=0.85
+        )
+        aadhaar_recognizer = PatternRecognizer(
+            supported_entity="IN_AADHAAR",
+            patterns=[aadhaar_pattern]
+        )
+        self.analyzer.registry.add_recognizer(aadhaar_recognizer)
         
         from aegisVault.constants import GDPR_RELEVANT_ENTITIES, HIPAA_RELEVANT_ENTITIES
         mode = getattr(self.cfg, "compliance_mode", "none").lower()

@@ -29,18 +29,21 @@ def _get_engine():
             "DATABASE_URL",
             "mysql+pymysql://aegis:aegis@localhost:3306/aegisdb"
         )
-        pool_size = int(os.environ.get("DATABASE_POOL_SIZE", "10"))
-        max_overflow = int(os.environ.get("DATABASE_MAX_OVERFLOW", "5"))
-        _engine = create_engine(
-            db_url,
-            pool_size=pool_size,
-            max_overflow=max_overflow,
-            pool_recycle=3600,
-            pool_pre_ping=True,   # auto-reconnect on stale connections
-            echo=False,
-        )
+        kwargs = {
+            "pool_recycle": 3600,
+            "pool_pre_ping": True,   # auto-reconnect on stale connections
+            "echo": False,
+        }
+        if not db_url.startswith("sqlite"):
+            pool_size = int(os.environ.get("DATABASE_POOL_SIZE", "10"))
+            max_overflow = int(os.environ.get("DATABASE_MAX_OVERFLOW", "5"))
+            kwargs["pool_size"] = pool_size
+            kwargs["max_overflow"] = max_overflow
+            
+        _engine = create_engine(db_url, **kwargs)
         logger.info(f"DB engine created")
     return _engine
+
 
 
 def init_db():
@@ -48,6 +51,24 @@ def init_db():
     global SessionLocal
     engine = _get_engine()
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    
+    # Programmatically ensure users table exists for admin authentication
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id            VARCHAR(36)   PRIMARY KEY,
+                    username      VARCHAR(255)  UNIQUE NOT NULL,
+                    password_hash VARCHAR(255)  NOT NULL,
+                    role          VARCHAR(50)   NOT NULL DEFAULT 'admin',
+                    created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            conn.commit()
+            logger.info("Users table verified/created")
+    except Exception as e:
+        logger.error(f"Failed to create users table: {e}")
+        
     logger.info("Database initialised")
 
 

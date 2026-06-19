@@ -1,14 +1,20 @@
 import { useState } from 'react';
-import { AppProvider } from './components/AppContext';
+import { AppProvider, useApp } from './components/AppContext';
 import { AppShell } from './components/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { QueryConsole } from './pages/QueryConsole';
 import { Ingestion } from './pages/Ingestion';
 import { SecurityEvents } from './pages/SecurityEvents';
 import { Settings } from './pages/Settings';
+import { AuthPage } from './pages/AuthPage';
 
 function AppContent() {
+  const { user } = useApp();
   const [activePage, setActivePage] = useState('dashboard');
+
+  if (!user) {
+    return <AuthPage />;
+  }
 
   const renderPage = () => {
     switch (activePage) {

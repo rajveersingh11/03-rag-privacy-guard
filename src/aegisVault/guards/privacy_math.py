@@ -42,10 +42,23 @@ class DPEmbedder:
         """
         Injects Laplacian noise: noise ~ Lap(0, sensitivity/epsilon).
         The noise scale is calibrated to the privacy budget.
+        Ensure vectors are normalized to unit length so that cosine similarity
+        in ChromaDB/FAISS remains mathematically valid.
         """
+        # Ensure vector is normalized to unit length before adding noise
+        norm = np.linalg.norm(vector)
+        if norm > 0:
+            vector = vector / norm
+
         scale = self.sensitivity / self.epsilon
         noise = np.random.laplace(loc=0.0, scale=scale, size=vector.shape)
-        return vector + noise
+        noisy = vector + noise
+
+        # Re-normalize to unit length for valid cosine distance calculations
+        noisy_norm = np.linalg.norm(noisy)
+        if noisy_norm > 0:
+            return noisy / noisy_norm
+        return noisy
 
     # ── LangChain Embeddings interface ────────────────────────────────
 
@@ -53,15 +66,49 @@ class DPEmbedder:
         """Generate DP-noised embeddings for a list of document chunks."""
         raw_embeddings = self.base_embedder.embed_documents(texts)
         dp_embeddings = []
+        
+        l2_norms = []
+        cosine_sims = []
 
         for i, emb in enumerate(raw_embeddings):
             vec = np.array(emb, dtype=np.float64)
             noisy = self._add_laplacian_noise(vec)
+            noisy_list = noisy.tolist()
 
-            noise_magnitude = float(np.linalg.norm(noisy - vec))
-            logger.debug(f"Chunk {i}: noise_magnitude={noise_magnitude:.6f}")
+            stats = self.compute_noise_stats(emb, noisy_list)
+            l2_norms.append(stats["noise_l2_norm"])
+            cosine_sims.append(stats["cosine_sim"])
 
-            dp_embeddings.append(noisy.tolist())
+            logger.debug(f"Chunk {i}: noise_magnitude={stats['noise_l2_norm']:.6f}")
+            dp_embeddings.append(noisy_list)
+
+        # Audit DP statistics to database
+        if len(raw_embeddings) > 0:
+            try:
+                import uuid
+                from sqlalchemy import text
+                from aegisVault.db.session import db_session
+                
+                mean_l2 = float(np.mean(l2_norms))
+                mean_cos = float(np.mean(cosine_sims))
+                
+                stmt = text("""
+                    INSERT INTO dp_audit (id, doc_id, epsilon, sensitivity, noise_l2_mean, cosine_sim_mean, chunks_processed)
+                    VALUES (:id, :doc_id, :epsilon, :sensitivity, :noise_l2_mean, :cosine_sim_mean, :chunks_processed)
+                """)
+                
+                with db_session() as session:
+                    session.execute(stmt, {
+                        "id": str(uuid.uuid4()),
+                        "doc_id": "unknown",  # doc_id is not directly exposed to embedder, can be correlated via timestamp
+                        "epsilon": self.epsilon,
+                        "sensitivity": self.sensitivity,
+                        "noise_l2_mean": mean_l2,
+                        "cosine_sim_mean": mean_cos,
+                        "chunks_processed": len(raw_embeddings)
+                    })
+            except Exception as e:
+                logger.error(f"Failed to log DP audit stats to DB: {e}")
 
         return dp_embeddings
 
